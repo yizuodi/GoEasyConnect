@@ -29,6 +29,21 @@ GoEasyConnect 是一个面向小型、自托管、单机环境的 Claude Code �
 - 已安装并配置至少一个 CLI：`claude` 或 `codex`
 - 使用 `runAsUser` 时，需要 `sudo` 和对应的免交互执行权限
 
+## 一键安装
+
+首个安装脚本只支持 Debian 的 `amd64`/`arm64`。它会从最新 GitHub Release
+下载对应架构、校验 SHA-256，引导监听地址、端口、访问密码、安装目录、默认
+Agent、CLI 路径、工作目录和 AI 会话 sudo 提权选项，创建或复用执行用户，
+并安装 systemd 服务：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yizuodi/GoEasyConnect/main/scripts/install.sh | sudo bash
+```
+
+脚本会保留既有 `config.json`、SQLite 数据和日志；确认重新配置时会先生成
+带时间戳的备份。AI 会话 sudo 提权默认开启；这会让掌握 Web 访问密码或 AI
+会话的用户具备系统级修改能力，请仅在信任环境中启用。
+
 ## 构建与运行
 
 项目不需要 Node.js、npm 或 CGO：
