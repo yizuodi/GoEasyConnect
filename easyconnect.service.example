@@ -1,0 +1,23 @@
+[Unit]
+Description=EasyConnect Go Web Panel
+After=network.target
+
+[Service]
+Type=simple
+User=easyconnect
+Group=easyconnect
+WorkingDirectory=/srv/easyconnect
+ExecStart=/srv/easyconnect/easyconnect --config /srv/easyconnect/config.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+Environment=HOME=/srv/easyconnect
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/srv/easyconnect
+
+[Install]
+WantedBy=multi-user.target

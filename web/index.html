@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EasyConnect</title>
+  <link rel="stylesheet" href="/style.css?v=1778644800">
+  <link rel="preload" href="/xterm.css?v=1778644800" as="style" onload="this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="/xterm.css?v=1778644800"></noscript>
+</head>
+<body>
+  <!-- Login -->
+  <div id="loginOverlay" class="login-overlay">
+    <div class="login-box">
+      <h1>🔗 EasyConnect</h1>
+      <p class="subtitle">Claude Code &amp; Codex Web Management Panel</p>
+      <input type="password" id="loginPassword" placeholder="输入密码" autofocus>
+      <button id="loginBtn">登录</button>
+      <div id="loginError" class="login-error">密码错误</div>
+    </div>
+  </div>
+
+  <!-- Main App -->
+  <div id="appLayout" class="app-layout hidden">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar" aria-label="主导航">
+      <div class="sidebar-header">
+        <h2>🔗 EasyConnect</h2>
+        <a href="/mobile" class="version-link" title="移动版">📱</a>
+      </div>
+      <div class="sidebar-tabs">
+        <div class="sidebar-tab active" onclick="switchTab('sessions')" id="tabSessions">会话</div>
+        <div class="sidebar-tab" onclick="switchTab('profiles')" id="tabProfiles">配置</div>
+      </div>
+      <div class="sidebar-content" id="sidebarContent"></div>
+      <div class="sidebar-footer">
+        <button class="btn btn-primary" id="sidebarActionBtn" onclick="onSidebarAction()">+ 新建会话</button>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <div class="main-content">
+      <div class="view-controls" aria-label="页面视图控制">
+        <button type="button" class="view-control-btn" id="sidebarToggle" onclick="toggleSidebar()" aria-controls="sidebar" aria-expanded="true" title="收起侧边栏">☰</button>
+        <button type="button" class="view-control-btn" id="fullscreenToggle" onclick="toggleFullscreen()" aria-pressed="false" title="进入全屏">⛶</button>
+      </div>
+      <div id="emptyState" class="empty-state">
+        <h2>EasyConnect</h2>
+        <p>选择或创建一个会话开始</p>
+      </div>
+      <div id="sessionView" class="hidden" style="display:flex;flex-direction:column;height:100%;">
+        <div class="topbar">
+          <span class="session-title" id="sessionTitle">-</span>
+          <div class="session-controls">
+            <select id="profileSelect" class="profile-select hidden" onchange="changeProfile()" title="切换配置（仅停止时）">
+              <option value="">默认配置</option>
+            </select>
+            <label class="skip-perm-toggle" id="skipPermLabel" title="跳过权限确认（仅停止时可切换）">
+              <input type="checkbox" id="skipPermCheck" onchange="toggleSkipPerm()">
+              <span>🔓 Skip Perms</span>
+            </label>
+            <button class="btn btn-sm btn-ghost" id="pollToggle" onclick="togglePolling()" title="切换连接模式">🔌 WebSocket</button>
+            <button class="btn btn-sm btn-ghost" id="btnFiles" onclick="openFileBrowser()" title="在文件管理器中打开工作目录">📁 文件</button>
+            <span id="sessionStatus" style="font-size:12px;color:var(--text-secondary)"></span>
+            <button class="btn btn-sm btn-ghost" id="btnStart" onclick="startSession()">▶ 启动</button>
+            <button class="btn btn-sm btn-ghost" id="btnStop" onclick="stopSession()">■ 停止</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteSession()">删除</button>
+          </div>
+        </div>
+        <div class="chat-area" id="terminalContainer"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div id="modalOverlay" class="modal-overlay hidden">
+    <div class="modal" id="modalContent"></div>
+  </div>
+
+  <!-- Inline login: works immediately, no dependency on external scripts -->
+  <script>
+  (function(){
+    var saved = localStorage.getItem('ec_token') || '';
+    window.__ecLoggedIn = false;
+
+    function doInlineLogin(pw, isAutoLogin) {
+      var h = {'Authorization': 'Bearer ' + pw};
+      localStorage.setItem('ec_token', pw);
+      window.__ecLoggedIn = true;
+      // Show app immediately, don't wait for API
+      document.getElementById('loginOverlay').classList.add('hidden');
+      document.getElementById('appLayout').classList.remove('hidden');
+      if (typeof showApp === 'function') showApp();
+      // Verify token in background
+      fetch('/api/sessions', {headers: h}).then(function(r) {
+        if (!r.ok) {
+          // Token invalid, go back to login
+          localStorage.removeItem('ec_token');
+          window.__ecLoggedIn = false;
+          document.getElementById('loginOverlay').classList.remove('hidden');
+          document.getElementById('appLayout').classList.add('hidden');
+          if (!isAutoLogin) {
+            document.getElementById('loginError').style.display = 'block';
+            var btn = document.getElementById('loginBtn'); btn.textContent = '登录'; btn.disabled = false;
+          }
+        }
+      }).catch(function() {
+        // Network error - keep showing app (offline tolerant)
+      });
+    }
+
+    document.getElementById('loginBtn').addEventListener('click', function() {
+      var btn = document.getElementById('loginBtn');
+      var pw = document.getElementById('loginPassword').value;
+      if (pw) { doInlineLogin(pw, false); }
+    });
+    document.getElementById('loginPassword').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        var pw = document.getElementById('loginPassword').value;
+        if (pw) doInlineLogin(pw, false);
+      }
+    });
+
+    // Auto-login if saved token exists
+    if (saved) doInlineLogin(saved, true);
+
+    // app.js will call showApp() if already logged in
+  })();
+  </script>
+  <script src="/xterm.js?v=1778644800" async></script>
+  <script src="/xterm-addon-fit.js?v=1778644800" async></script>
+  <script src="/app.js?v=1778644800" async></script>
+</body>
+</html>

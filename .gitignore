@@ -1,0 +1,37 @@
+# Build output
+/easyconnect
+/easyconnect.exe
+/dist/
+/coverage.out
+*.test
+*.prof
+
+# Runtime configuration and data
+config.json
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.log
+*.pid
+
+# Common credential and private-key files
+.env
+.env.*
+tmp-pat
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local agent profiles may contain credentials
+.claude/
+.codex/
+
+# Editors and operating systems
+/.idea/
+/.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db

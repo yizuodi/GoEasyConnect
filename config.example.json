@@ -1,0 +1,59 @@
+{
+  "server": {
+    "port": 26890,
+    "host": "127.0.0.1"
+  },
+  "auth": {
+    "password": "change-this-password"
+  },
+  "database": {
+    "path": "./easyconnect.db"
+  },
+  "claude": {
+    "binary": "claude",
+    "settingsDir": "",
+    "projectsDir": "",
+    "defaultWorkingDir": "",
+    "runAsUser": ""
+  },
+  "codex": {
+    "binary": "codex",
+    "home": "",
+    "sessionsDir": "",
+    "runAsUser": ""
+  },
+  "session": {
+    "defaultAgent": "claude",
+    "defaultWorkingDir": "",
+    "pollIntervalMs": 300,
+    "pollBufferSize": 500,
+    "outputBufferBytes": 2097152,
+    "pollBufferBytes": 1048576
+  },
+  "defaults": {
+    "codexProfileContent": "# Custom provider; credentials are injected only into this session\napi_key = \"\"\nbase_url = \"\"\nmodel = \"\"\nwire_api = \"responses\"\n",
+    "profileContent": {
+      "hasCompletedOnboarding": true,
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "",
+        "ANTHROPIC_BASE_URL": "",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": ""
+      }
+    }
+  },
+  "branding": {
+    "name": "EasyConnect",
+    "emoji": "🔗",
+    "documentTitle": "EasyConnect",
+    "welcomeSubtitle": "Claude Code & Codex Web Management Panel"
+  },
+  "fileBrowser": {
+    "url": ""
+  },
+  "logging": {
+    "path": "./error.log",
+    "maxSizeMB": 10
+  }
+}
