@@ -8,8 +8,7 @@ GoEasyConnect 是一个面向小型、自托管、单机环境的 Claude Code �
 二进制；运行时只需要二进制、`config.json`、SQLite 数据库和错误日志。
 
 > [!WARNING]
-> GoEasyConnect 能以服务账户权限启动 AI CLI 并提供交互式终端。请将它视为管理
-> 界面：使用强密码，只通过 HTTPS 反向代理对外提供服务，并谨慎启用跳过权限确认。
+> GoEasyConnect 能以服务账户权限启动 AI CLI 并提供交互式终端。请将它视为管理界面：使用强密码，只通过 HTTPS 反向代理对外提供服务，并谨慎启用跳过权限确认。
 
 ## 功能
 
