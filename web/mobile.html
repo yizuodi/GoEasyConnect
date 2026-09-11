@@ -67,6 +67,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',Roboto,san
 .tbtn.on{background:var(--accent);color:#000;border-color:var(--accent)}
 .tbtn.danger{color:var(--danger);border-color:var(--danger)}
 .tbtn.off{opacity:.4;pointer-events:none}
+.tbtn:disabled{opacity:.4;pointer-events:none}
 .term-body{flex:1;background:#0a0a14;overflow:hidden}
 .term-ft{padding:10px 12px calc(10px + var(--safe-b));background:var(--bg2);border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-shrink:0}
 
@@ -125,6 +126,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',Roboto,san
         <div class="term-acts">
           <button class="tbtn" id="btnStart">▶</button>
           <button class="tbtn hidden" id="btnStop">■</button>
+          <button class="tbtn" id="fsBtn" aria-pressed="false" title="进入全屏">⛶</button>
           <button class="tbtn danger" id="btnDel">✕</button>
         </div>
       </div>
@@ -171,7 +173,7 @@ let sid=null,sessions=[],profiles=[];
 let ws=null,wsConnectGeneration=0,term=null,fit=null;
 let usePolling=localStorage.getItem('ec_polling')==='true';
 let pollSeq=0,pollTimer=null,POLL_MS=300;
-let curPage='sessions',appCfg={};
+let curPage='sessions',appCfg={},appDefaults={};
 
 // ============ Events (addEventListener, no inline onclick) ============
 $('loginBtn').addEventListener('click',doLogin);
@@ -185,9 +187,14 @@ $('spBtn').addEventListener('click',toggleSP);
 $('profSel').addEventListener('change',changeProfile);
 $('fbBtn').addEventListener('click',openFB);
 $('wsBtn').addEventListener('click',toggleWS);
+$('fsBtn').addEventListener('click',toggleFullscreen);
 $('tabS').addEventListener('click',()=>goTab('sessions'));
 $('tabP').addEventListener('click',()=>goTab('profiles'));
 $('overlay').addEventListener('click',e=>{if(e.target===$('overlay'))closeSheet()});
+window.addEventListener('resize',fitTerminalView);
+window.addEventListener('orientationchange',()=>setTimeout(fitTerminalView,120));
+document.addEventListener('fullscreenchange',updateFullscreenBtn);
+document.addEventListener('webkitfullscreenchange',updateFullscreenBtn);
 
 // ============ Init ============
 if(token)checkAuth();
@@ -216,6 +223,7 @@ function enterApp(){
   $('app').classList.remove('hidden');
   api('/api/config').then(r=>r.json()).then(c=>{if(c.branding){const b=c.branding;document.title=b.documentTitle||'EasyConnect';const t=$('mLoginTitle');if(t)t.textContent=(b.emoji||'🔗')+' '+((b.name||'EasyConnect'));}});
   api('/api/app-config').then(r=>r.json()).then(c=>{appCfg=c;POLL_MS=c.pollIntervalMs||300;});
+  api('/api/defaults').then(r=>r.json()).then(d=>{appDefaults=d;});
   refresh();
 }
 
@@ -243,7 +251,7 @@ function goSessions(){
   api('/api/app-config').then(r=>r.json()).then(c=>{appCfg=c;POLL_MS=c.pollIntervalMs||300;});
   refresh();
 }
-function goTerm(s){
+async function goTerm(s){
   sid=s.id;curPage='terminal';
   $('pgSessions').classList.remove('active');
   $('pgProfiles').classList.remove('active');
@@ -256,8 +264,10 @@ function goTerm(s){
   updateCtrl(s);
   updateWsBtn();
   initTerm();disconnectAll();
+  await loadHistory(s.id);
+  if(sid!==s.id||curPage!=='terminal')return;
   if(s.isRunning){if(usePolling)startPoll(s.id);else connectWS(s.id);}
-  setTimeout(()=>{try{fit.fit();}catch{}},150);
+  fitTerminalView();
 }
 
 // ============ Refresh ============
@@ -265,7 +275,12 @@ async function refresh(){
   const[sr,pr]=await Promise.all([api('/api/sessions'),api('/api/profiles')]);
   if(sr.ok)sessions=await sr.json();
   if(pr.ok)profiles=await pr.json();
-  const current=sessions.find(x=>x.id===sid);if(current)populateProfSelect($('profSel'),current.agent);
+  const current=sessions.find(x=>x.id===sid);
+  if(current){
+    const profileSelect=$('profSel');
+    populateProfSelect(profileSelect,current.agent);
+    profileSelect.value=current.profile_id||'';
+  }
   renderS();renderP();
 }
 
@@ -310,14 +325,16 @@ async function changeProfile(){
   if(!sid)return;const s=sessions.find(x=>x.id===sid);if(!s||s.isRunning)return;
   const pid=$('profSel').value||null;
   const r=await api('/api/sessions/'+sid+'/profile',{method:'PATCH',body:JSON.stringify({profile_id:pid})});
-  if(r.ok){const u=await r.json();Object.assign(s,u);updateCtrl(s);}
+  if(!r.ok){try{const e=await r.json();alert(e.error||'切换配置失败');}catch{alert('切换配置失败');}return;}
+  const u=await r.json();Object.assign(s,u);updateCtrl(s);
 }
 
 async function toggleSP(){
   if(!sid)return;const s=sessions.find(x=>x.id===sid);
   if(!s||s.isRunning)return;
   const on=!s.skip_permissions;
-  await api('/api/sessions/'+sid+'/skip-permissions',{method:'PATCH',body:JSON.stringify({enabled:!!on})});
+  const r=await api('/api/sessions/'+sid+'/skip-permissions',{method:'PATCH',body:JSON.stringify({enabled:!!on})});
+  if(!r.ok){try{const e=await r.json();alert(e.error||'切换权限模式失败');}catch{alert('切换权限模式失败');}return;}
   s.skip_permissions=on?1:0;updateCtrl(s);
 }
 async function doStart(){
@@ -331,7 +348,8 @@ async function doStart(){
 }
 async function doStop(){
   if(!sid)return;
-  await api('/api/sessions/'+sid+'/stop',{method:'POST'});
+  const r=await api('/api/sessions/'+sid+'/stop',{method:'POST'});
+  if(!r.ok){try{const e=await r.json();alert(e.error||'停止失败');}catch{alert('停止失败');}return;}
   disconnectAll();
   const s=sessions.find(x=>x.id===sid);
   if(s){s.isRunning=false;updateCtrl(s);}
@@ -339,7 +357,8 @@ async function doStop(){
 async function doDelete(){
   if(!sid||!confirm('确定删除？'))return;
   disconnectAll();
-  await api('/api/sessions/'+sid,{method:'DELETE'});
+  const r=await api('/api/sessions/'+sid,{method:'DELETE'});
+  if(!r.ok){try{const e=await r.json();alert(e.error||'删除失败');}catch{alert('删除失败');}return;}
   sid=null;if(term){term.dispose();term=null;}
   goSessions();
 }
@@ -366,6 +385,31 @@ function openFB(){
   window.open(url+'/files/'+p,'_blank');
 }
 
+function fullscreenElement(){return document.fullscreenElement||document.webkitFullscreenElement||null;}
+function updateFullscreenBtn(){
+  const b=$('fsBtn');if(!b)return;
+  const active=!!fullscreenElement();
+  const supported=!!(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen);
+  b.disabled=!supported;
+  b.textContent=active?'🗗':'⛶';
+  b.classList.toggle('on',active);
+  b.setAttribute('aria-pressed',String(active));
+  b.title=supported?(active?'退出全屏':'进入全屏'):'当前浏览器不支持全屏';
+}
+async function toggleFullscreen(){
+  try{
+    if(fullscreenElement()){
+      const exit=document.exitFullscreen||document.webkitExitFullscreen;
+      if(exit)await exit.call(document);
+    }else{
+      const root=document.documentElement;
+      const request=root.requestFullscreen||root.webkitRequestFullscreen;
+      if(request)await request.call(root);
+    }
+  }catch(error){console.warn('切换全屏失败:',error);}
+  finally{updateFullscreenBtn();setTimeout(fitTerminalView,120);}
+}
+
 // ============ Terminal ============
 function initTerm(){
   if(term){term.dispose();term=null;}
@@ -381,7 +425,19 @@ function initTerm(){
   try{fit.fit();}catch{}
   term.onData(d=>sendInput(d));
   term.onResize(({cols,rows})=>sendResize(cols,rows));
-  window.addEventListener('resize',()=>{try{if(fit)fit.fit();}catch{}});
+  updateFullscreenBtn();
+  fitTerminalView();
+}
+
+function fitTerminalView(){try{if(fit)fit.fit();}catch{}}
+async function loadHistory(id){
+  const r=await api('/api/sessions/'+id+'/messages');
+  if(!r.ok)return;
+  const messages=await r.json();
+  messages.forEach(m=>{
+    if(m.role==='user')term?.write('\x1b[1;36m> '+m.content+'\x1b[0m\r\n');
+    else if(m.content)term?.write(m.content);
+  });
 }
 function sendInput(d){
   if(!sid)return;
@@ -438,7 +494,7 @@ function onFab(){if(curPage==='profiles')newProfSheet();else newSessionSheet();}
 
 // ============ Session Sheet ============
 function newSessionSheet(){
-  const defaultDir=appCfg.defaultWorkingDir||'/home/user/code';
+  const defaultDir=appDefaults.workingDir||appCfg.defaultWorkingDir||'/home/user/code';
   sheet(`<h3>新建会话</h3><label>名称</label><input id="sName" placeholder="my-project"><label>智能体</label><select id="sAgent"><option value="claude">Claude Code</option><option value="codex">Codex</option></select><div id="sProfGroup"><label>配置</label><select id="sProf"></select></div><label>工作目录</label><input id="sDir" value="${escAttr(defaultDir)}" placeholder="/home/user/code"><div class="sheet-btns"><button class="btn-cancel" id="shCancel">取消</button><button class="btn-ok" id="shOk">创建</button></div>`);
   $('sAgent').value=appCfg.defaultAgent||'claude';
   const syncAgent=()=>populateProfSelect($('sProf'),$('sAgent').value);
@@ -450,7 +506,7 @@ async function createSession(){
   const name=$('sName').value.trim();if(!name)return alert('请输入名称');
   const profile_id=$('sProf').value||null;
   const agent=$('sAgent').value;
-  const working_dir=$('sDir').value.trim()||appCfg.defaultWorkingDir||'/home/user/code';
+  const working_dir=$('sDir').value.trim()||appDefaults.workingDir||appCfg.defaultWorkingDir||'/home/user/code';
   const r=await api('/api/sessions',{method:'POST',body:JSON.stringify({name,agent,profile_id,working_dir})});
   if(!r.ok){const e=await r.json();return alert(e.error||'失败');}
   const data=await r.json();
@@ -463,10 +519,11 @@ async function createSession(){
 
 // ============ Profile Sheet ============
 function newProfSheet(){
-  const claudeTpl={hasCompletedOnboarding:true,env:{ANTHROPIC_AUTH_TOKEN:"",ANTHROPIC_BASE_URL:"",ANTHROPIC_DEFAULT_OPUS_MODEL:"",ANTHROPIC_DEFAULT_SONNET_MODEL:"",ANTHROPIC_DEFAULT_HAIKU_MODEL:""}};
-  const codexTpl='# Custom provider; credentials are injected only into this session\napi_key = ""\nbase_url = ""\nmodel = ""\nwire_api = "responses"\n';
+  const fallbackClaudeTemplate={hasCompletedOnboarding:true,env:{ANTHROPIC_AUTH_TOKEN:"",ANTHROPIC_BASE_URL:"",ANTHROPIC_DEFAULT_OPUS_MODEL:"",ANTHROPIC_DEFAULT_SONNET_MODEL:"",ANTHROPIC_DEFAULT_HAIKU_MODEL:""}};
+  const claudeTemplate=appDefaults.profileContent||fallbackClaudeTemplate;
+  const codexTemplate=appDefaults.codexProfileContent||'# Custom provider; credentials are injected only into this session\napi_key = ""\nbase_url = ""\nmodel = ""\nwire_api = "responses"\n';
   sheet(`<h3>新建配置</h3><label>智能体</label><select id="pAgent"><option value="claude">Claude Code (JSON)</option><option value="codex">Codex (TOML)</option></select><label>名称</label><input id="pName" placeholder="如：production"><label>描述</label><input id="pDesc" placeholder="可选"><label id="pFormat">JSON</label><textarea id="pJson"></textarea><div class="sheet-btns"><button class="btn-cancel" id="shCancel">取消</button><button class="btn-ok" id="shOk">创建</button></div>`);
-  const sync=()=>{const codex=$('pAgent').value==='codex';$('pFormat').textContent=codex?'TOML':'JSON';$('pJson').value=codex?codexTpl:JSON.stringify(claudeTpl,null,2);};
+  const sync=()=>{const codex=$('pAgent').value==='codex';$('pFormat').textContent=codex?'TOML':'JSON';$('pJson').value=codex?codexTemplate:JSON.stringify(claudeTemplate,null,2);};
   $('pAgent').addEventListener('change',sync);sync();
   $('shCancel').addEventListener('click',closeSheet);
   $('shOk').addEventListener('click',createProf);
