@@ -25,7 +25,7 @@ GoEasyConnect 是一个面向小型、自托管、单机环境的 Claude Code �
 ## 系统要求
 
 - Linux（PTY 和进程组管理依赖 Linux/Unix 行为）
-- Go 1.24 或更新版本（仅源码构建时需要）
+- Go 1.25 或更新版本（仅源码构建时需要）
 - 已安装并配置至少一个 CLI：`claude` 或 `codex`
 - 使用 `runAsUser` 时，需要 `sudo` 和对应的免交互执行权限
 
