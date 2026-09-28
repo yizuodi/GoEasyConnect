@@ -37,15 +37,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',Roboto,san
 
 /* List */
 .slist{flex:1;overflow-y:auto;padding:8px 8px 80px}
-.sitem{padding:14px 16px;min-height:56px;border-radius:var(--radius);margin-bottom:6px;display:flex;align-items:center;gap:12px;background:var(--bg2);border:1px solid var(--border);cursor:pointer;-webkit-user-select:none;user-select:none}
+.sitem,.pitem{padding:14px 16px;border-radius:var(--radius);margin-bottom:6px;background:var(--bg2);border:1px solid var(--border)}
+.sitem{min-height:56px;cursor:pointer;-webkit-user-select:none;user-select:none}
 .sitem:active{background:var(--bg3)}
 .sitem.on{border-color:var(--accent);background:var(--bg3)}
+.sitem:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sitem-main{width:100%;display:flex;align-items:center;gap:12px}
 .sitem-info{flex:1;min-width:0}
 .sitem-name{font-size:15px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sitem-meta{font-size:12px;color:var(--text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sitem-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
 .sitem-dot.run{background:var(--success)}
 .sitem-dot.stop{background:var(--muted)}
+.sitem-actions{display:flex;gap:8px;margin-top:10px;cursor:default}
 
 /* FAB */
 .fab{position:fixed;bottom:calc(72px + var(--safe-b));right:16px;width:52px;height:52px;background:var(--accent);color:#000;border:none;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.4);z-index:40;touch-action:manipulation}
@@ -70,6 +74,24 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',Roboto,san
 .tbtn:disabled{opacity:.4;pointer-events:none}
 .term-body{flex:1;background:#0a0a14;overflow:hidden}
 .term-ft{padding:10px 12px calc(10px + var(--safe-b));background:var(--bg2);border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-shrink:0}
+.view-switch{display:flex;background:var(--bg2);border-bottom:1px solid var(--border);padding:6px 12px;gap:6px;flex-shrink:0}
+.view-switch .tbtn{flex:1}
+.conv-view{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg)}
+.conv-messages{flex:1;overflow-y:auto;padding:14px 12px;display:flex;flex-direction:column;gap:12px;-webkit-overflow-scrolling:touch}
+.conv-empty{margin:auto;color:var(--text2);text-align:center;line-height:1.6;padding:24px}
+.conv-msg{max-width:92%;padding:10px 12px;border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45;font-size:14px}
+.conv-msg.user{align-self:flex-end;background:#17506b;color:#fff;border-bottom-right-radius:4px}
+.conv-msg.assistant{align-self:flex-start;background:var(--bg2);border:1px solid var(--border);border-bottom-left-radius:4px}
+.conv-msg.assistant:empty::after{content:'Codex 正在思考…';color:var(--text2)}
+.conv-tool{background:var(--bg2);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text2)}
+.conv-tool summary{padding:9px 10px;cursor:pointer;color:var(--text)}
+.conv-tool pre{padding:0 10px 10px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}
+.conv-error{padding:9px 10px;border:1px solid var(--danger);color:var(--danger);border-radius:8px;font-size:13px}
+.conv-compose{padding:10px 10px calc(10px + var(--safe-b));background:var(--bg2);border-top:1px solid var(--border);display:flex;gap:8px;align-items:flex-end}
+.conv-compose textarea{flex:1;min-height:44px;max-height:140px;resize:none;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--text);font:inherit;outline:none}
+.conv-compose textarea:focus{border-color:var(--accent)}
+.conv-send{height:44px;padding:0 15px;border:0;border-radius:9px;background:var(--accent);color:#000;font-weight:600}
+.conv-hint{padding:7px 12px;background:#3b2d16;color:#ffd180;font-size:12px;border-bottom:1px solid #6d4c20}
 
 /* Bottom Sheet / Overlay */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100;display:none;align-items:flex-end;justify-content:center}
@@ -86,7 +108,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',Roboto,san
 .btn-ok:active,.btn-cancel:active{opacity:.7}
 
 /* Profiles */
-.pitem{padding:14px 16px;border-radius:var(--radius);margin-bottom:6px;background:var(--bg2);border:1px solid var(--border)}
 .pitem-name{font-size:15px;font-weight:500}
 .pitem-desc{font-size:12px;color:var(--text2);margin-top:2px}
 .pitem-btns{display:flex;gap:8px;margin-top:10px}
@@ -127,11 +148,23 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',Roboto,san
           <button class="tbtn" id="btnStart">▶</button>
           <button class="tbtn hidden" id="btnStop">■</button>
           <button class="tbtn" id="fsBtn" aria-pressed="false" title="进入全屏">⛶</button>
-          <button class="tbtn danger" id="btnDel">✕</button>
         </div>
       </div>
+      <div class="view-switch hidden" id="viewSwitch">
+        <button class="tbtn on" id="termViewBtn">原生终端</button>
+        <button class="tbtn" id="chatViewBtn">对话模式</button>
+      </div>
       <div class="term-body" id="termBox"></div>
-      <div class="term-ft">
+      <div class="conv-view hidden" id="convView">
+        <div class="conv-hint hidden" id="convHint"></div>
+        <div class="conv-messages" id="convMessages"></div>
+        <div class="conv-compose">
+          <textarea id="convInput" rows="1" placeholder="向 Codex 发送消息；Enter 换行"></textarea>
+          <button class="tbtn danger hidden" id="convStop">停止</button>
+          <button class="conv-send" id="convSend">发送</button>
+        </div>
+      </div>
+      <div class="term-ft" id="termFooter">
         <select id="profSel" class="prof-sel hidden"><option value="">默认</option></select>
         <button class="tbtn" id="wsBtn">WS</button>
         <button class="tbtn" id="spBtn">Skip</button>
@@ -174,6 +207,9 @@ let ws=null,wsConnectGeneration=0,term=null,fit=null;
 let usePolling=localStorage.getItem('ec_polling')==='true';
 let pollSeq=0,pollTimer=null,POLL_MS=300;
 let curPage='sessions',appCfg={},appDefaults={};
+let sessionView='terminal',convTimer=null,convSeq=0,convEvents=[],convMessageKey='',convEventKey='';
+let convAutoScroll=true,convLastScrollTop=0;
+let convTurnMessages=new Map();
 
 // ============ Events (addEventListener, no inline onclick) ============
 $('loginBtn').addEventListener('click',doLogin);
@@ -182,12 +218,18 @@ $('fab').addEventListener('click',onFab);
 $('btnBack').addEventListener('click',goSessions);
 $('btnStart').addEventListener('click',doStart);
 $('btnStop').addEventListener('click',doStop);
-$('btnDel').addEventListener('click',doDelete);
 $('spBtn').addEventListener('click',toggleSP);
 $('profSel').addEventListener('change',changeProfile);
 $('fbBtn').addEventListener('click',openFB);
 $('wsBtn').addEventListener('click',toggleWS);
 $('fsBtn').addEventListener('click',toggleFullscreen);
+$('chatViewBtn').addEventListener('click',()=>switchSessionView('conversation'));
+$('termViewBtn').addEventListener('click',()=>switchSessionView('terminal'));
+$('convSend').addEventListener('click',sendConversationMessage);
+$('convStop').addEventListener('click',stopConversation);
+$('convInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();sendConversationMessage();}});
+$('convMessages').addEventListener('wheel',e=>{if(e.deltaY<0)convAutoScroll=false;},{passive:true});
+$('convMessages').addEventListener('scroll',()=>{const box=$('convMessages'),current=box.scrollTop,distance=box.scrollHeight-current-box.clientHeight;if(current<convLastScrollTop-1)convAutoScroll=false;else if(distance<32)convAutoScroll=true;convLastScrollTop=current;},{passive:true});
 $('tabS').addEventListener('click',()=>goTab('sessions'));
 $('tabP').addEventListener('click',()=>goTab('profiles'));
 $('overlay').addEventListener('click',e=>{if(e.target===$('overlay'))closeSheet()});
@@ -222,9 +264,8 @@ function enterApp(){
   $('login').style.display='none';
   $('app').classList.remove('hidden');
   api('/api/config').then(r=>r.json()).then(c=>{if(c.branding){const b=c.branding;document.title=b.documentTitle||'EasyConnect';const t=$('mLoginTitle');if(t)t.textContent=(b.emoji||'🔗')+' '+((b.name||'EasyConnect'));}});
-  api('/api/app-config').then(r=>r.json()).then(c=>{appCfg=c;POLL_MS=c.pollIntervalMs||300;});
+  api('/api/app-config').then(r=>r.json()).then(c=>{appCfg=c;POLL_MS=c.pollIntervalMs||300;}).catch(()=>{}).then(()=>refresh());
   api('/api/defaults').then(r=>r.json()).then(d=>{appDefaults=d;});
-  refresh();
 }
 
 // ============ Navigation ============
@@ -239,7 +280,8 @@ function goTab(tab){
   $('tabbar').style.display='';
 }
 function goSessions(){
-  sid=null;disconnectAll();
+  sid=null;disconnectAll();stopConversationPoll();
+  updateSessionURL(null);
   if(term){term.dispose();term=null;}
   curPage='sessions';
   $('pgSessions').classList.add('active');
@@ -261,12 +303,17 @@ async function goTerm(s){
   $('fab').classList.add('hidden');
   $('tabbar').style.display='none';
   updateTermTitle(s);
+  const enabled=!!appCfg.experimental?.conversationMode&&s.agent==='codex';
+  $('viewSwitch').classList.toggle('hidden',!enabled);
+  sessionView=enabled?(s.running_mode||s.run_mode||'terminal'):'terminal';
+  updateSessionURL(s.id,sessionView);
   updateCtrl(s);
   updateWsBtn();
-  initTerm();disconnectAll();
-  await loadHistory(s.id);
+  disconnectAll();stopConversationPoll();
+  if(sessionView==='conversation')await openConversation(s);
+  else{showTerminalView();initTerm();await loadHistory(s.id);}
   if(sid!==s.id||curPage!=='terminal')return;
-  if(s.isRunning){if(usePolling)startPoll(s.id);else connectWS(s.id);}
+  if(sessionView==='terminal'&&s.terminal_running){if(usePolling)startPoll(s.id);else connectWS(s.id);}
   fitTerminalView();
 }
 
@@ -282,20 +329,25 @@ async function refresh(){
     profileSelect.value=current.profile_id||'';
   }
   renderS();renderP();
+  if(!sid){
+    const requestedID=new URL(window.location.href).searchParams.get('session');
+    if(requestedID){const requested=sessions.find(x=>x.id===requestedID);if(requested)await goTerm(requested);else updateSessionURL(null);}
+  }
 }
+
+function updateSessionURL(id,mode=''){const url=new URL(window.location.href);if(id){url.searchParams.set('session',id);if(mode==='terminal'||mode==='conversation')url.searchParams.set('mode',mode);else url.searchParams.delete('mode');}else{url.searchParams.delete('session');url.searchParams.delete('mode');}window.history.replaceState({},'',url);}
 
 // ============ Sessions ============
 function renderS(){
   const el=$('sessionList');
   if(!sessions.length){el.innerHTML='<div style="padding:40px;text-align:center;color:var(--muted)">暂无会话</div>';return;}
-  el.innerHTML=sessions.map(s=>`<div class="sitem ${s.id===sid?'on':''}" data-sid="${escAttr(s.id)}"><div class="sitem-info"><div class="sitem-name">${s.agent==='codex'?'🟢 Codex':'🟣 Claude'} · ${esc(s.name)}</div><div class="sitem-meta">${esc(s.profile_name||(s.agent==='codex'?'Codex 默认配置':'Claude 默认配置'))} · ${esc(s.working_dir||'')}</div></div><div class="sitem-dot ${s.isRunning?'run':'stop'}"></div></div>`).join('');
-  // Bind click
+  el.innerHTML=sessions.map(s=>`<div class="sitem ${s.id===sid?'on':''}" data-sid="${escAttr(s.id)}" role="button" tabindex="0" aria-label="打开会话 ${escAttr(s.name)}"><div class="sitem-main"><div class="sitem-info"><div class="sitem-name">${s.agent==='codex'?'🟢 Codex':'🟣 Claude'} · ${esc(s.name)}</div><div class="sitem-meta">${esc(s.profile_name||(s.agent==='codex'?'Codex 默认配置':'Claude 默认配置'))} · ${esc(s.working_dir||'')}</div></div><span class="sitem-dot ${s.isRunning?'run':'stop'}"></span></div><div class="sitem-actions"><button class="tbtn js-edits" data-sid="${escAttr(s.id)}" ${s.isRunning?'disabled title="请先停止会话"':''}>编辑</button><button class="tbtn danger js-dels" data-sid="${escAttr(s.id)}">删除</button></div></div>`).join('');
   el.querySelectorAll('.sitem').forEach(item=>{
-    item.addEventListener('click',()=>{
-      const s=sessions.find(x=>x.id===item.dataset.sid);
-      if(s)goTerm(s);
-    });
+    item.addEventListener('click',e=>{if(!e.target.closest('.js-edits,.js-dels')){const s=sessions.find(x=>x.id===item.dataset.sid);if(s)goTerm(s);}});
+    item.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&!e.target.closest('.js-edits,.js-dels')){e.preventDefault();const s=sessions.find(x=>x.id===item.dataset.sid);if(s)goTerm(s);}});
   });
+  el.querySelectorAll('.js-edits').forEach(b=>b.addEventListener('click',()=>editSessionSheet(b.dataset.sid)));
+  el.querySelectorAll('.js-dels').forEach(b=>b.addEventListener('click',()=>deleteSessionById(b.dataset.sid)));
 }
 
 // ============ Profiles ============
@@ -312,12 +364,89 @@ function updateCtrl(s){
   const r=s.isRunning;
   $('btnStart').classList.toggle('hidden',r);
   $('btnStop').classList.toggle('hidden',!r);
+  $('chatViewBtn').disabled=r;$('termViewBtn').disabled=r;
   $('spBtn').classList.toggle('on',!!s.skip_permissions);
   $('spBtn').classList.toggle('off',r);
   $('spBtn').title=s.agent==='codex'?'Codex 完全访问模式':'跳过 Claude Code 权限确认';
   const ps=$('profSel');
   if(ps){populateProfSelect(ps,s.agent);ps.classList.toggle('hidden',r);ps.value=s.profile_id||'';updateTermTitle(s);}
+  updateConvHint(s);
 }
+function updateConvHint(s){
+  if(!s)return;const warnings=[];
+  if(!s.isRunning)warnings.push('点击“启动”后才能发送消息；切换模式需要先停止会话。');
+  if(!s.skip_permissions)warnings.push('对话模式需要先开启 Skip。');
+  $('convHint').textContent=warnings.join(' ');$('convHint').classList.toggle('hidden',!warnings.length);
+}
+
+async function switchSessionView(view){
+  const s=sessions.find(x=>x.id===sid);if(!s)return;
+  if(s.isRunning&&view!==(s.running_mode||s.run_mode))return;
+  if(view!==s.run_mode){
+    const r=await api('/api/sessions/'+sid+'/mode',{method:'PATCH',body:JSON.stringify({mode:view})});
+    if(!r.ok){let e={};try{e=await r.json();}catch{}alert(e.error||'切换模式失败');return;}
+    s.run_mode=view;
+  }
+  sessionView=view;
+  updateSessionURL(sid,view);
+  disconnectAll();stopConversationPoll();updateCtrl(s);
+  if(view==='conversation')await openConversation(s);
+  else{showTerminalView();initTerm();await loadHistory(s.id);if(s.terminal_running){if(usePolling)startPoll(s.id);else connectWS(s.id);}fitTerminalView();}
+}
+function showTerminalView(){
+  $('termBox').classList.remove('hidden');$('convView').classList.add('hidden');$('termFooter').classList.remove('hidden');
+  $('termViewBtn').classList.add('on');$('chatViewBtn').classList.remove('on');
+}
+async function openConversation(s){
+  if(term){term.dispose();term=null;}
+  $('termBox').classList.add('hidden');$('convView').classList.remove('hidden');$('termFooter').classList.remove('hidden');
+  $('chatViewBtn').classList.add('on');$('termViewBtn').classList.remove('on');
+  convSeq=0;convEvents=[];convMessageKey='';convEventKey='';convAutoScroll=true;convLastScrollTop=0;convTurnMessages=new Map();
+  updateConvHint(s);
+  await pollConversation(s.id,true);
+}
+function stopConversationPoll(){if(convTimer){clearTimeout(convTimer);convTimer=null;}}
+async function pollConversation(id,immediate=false){
+  stopConversationPoll();if(!sid||sid!==id||sessionView!=='conversation')return;
+  try{
+    const[mr,er]=await Promise.all([api('/api/sessions/'+id+'/conversation/messages'),api('/api/sessions/'+id+'/conversation/events?after='+convSeq)]);
+    if(mr.ok){const data=await mr.json();renderConversation(data.messages||[]);setConversationState(!!data.running,!!data.session_running);}
+    if(er.ok){const data=await er.json();for(const ev of(data.events||[])){convSeq=Math.max(convSeq,ev.seq||0);rememberConvContext(ev);if(ev.type.startsWith('tool.')||ev.type==='file.change'||ev.type==='turn.failed')mergeConvEvent(ev);}renderConversationEvents();setConversationState(!!data.running,!!data.session_running);}
+  }catch{}
+  if(sid===id&&sessionView==='conversation')convTimer=setTimeout(()=>pollConversation(id),immediate?100:700);
+}
+function renderConversation(messages){
+  const key=messages.map(m=>m.id+':'+m.content).join('|');if(key===convMessageKey)return;convMessageKey=key;convEventKey='';
+  const box=$('convMessages');updateConvDOM(box,()=>{box.querySelectorAll('.conv-msg,.conv-empty').forEach(n=>n.remove());if(!messages.length){const e=document.createElement('div');e.className='conv-empty';e.textContent='Codex 对话模式\n停止会话后可切换到原生终端';box.prepend(e);}else for(const m of messages){const el=document.createElement('div');el.className='conv-msg '+(m.role==='user'?'user':'assistant');el.dataset.messageId=m.id;el.textContent=m.content||'';box.insertBefore(el,box.querySelector('.conv-tool,.conv-error'));}});renderConversationEvents();
+}
+function updateConvDOM(box,update){const previous=box.scrollTop,follow=convAutoScroll;update();box.scrollTop=follow?box.scrollHeight:previous;convLastScrollTop=box.scrollTop;}
+function rememberConvContext(ev){if(!ev.turn_id)return;const messageId=ev.payload?.assistant_message_id||(ev.type==='assistant.message'?ev.payload?.message_id:'');if(!messageId||convTurnMessages.get(ev.turn_id)===messageId)return;convTurnMessages.set(ev.turn_id,messageId);convEventKey='';}
+function mergeConvEvent(ev){
+  const lifecycle=ev.type.startsWith('tool.')||ev.type==='file.change';
+  const key=lifecycle&&ev.item_id?(ev.turn_id||'')+':'+ev.item_id:ev.type==='turn.failed'&&ev.turn_id?ev.turn_id+':turn.failed':'';
+  if(!key){convEvents.push(ev);return;}
+  ev._displayKey=key;const index=convEvents.findIndex(item=>item._displayKey===key);
+  if(index<0)convEvents.push(ev);else convEvents[index]=ev;
+}
+function convEventBody(p){
+  if(p.output)return p.output;
+  if(Array.isArray(p.changes)&&p.changes.length)return JSON.stringify(p.changes,null,2);
+  if(p.changes&&typeof p.changes==='object'&&Object.keys(p.changes).length)return JSON.stringify(p.changes,null,2);
+  return p.status||(p.phase==='started'?'执行中…':'无输出');
+}
+function renderConversationEvents(){
+  const visible=convEvents.slice(-50),key=visible.map(ev=>(ev.seq||0)+':'+ev.type+':'+JSON.stringify(ev.payload||{})).join('|');if(key===convEventKey)return;convEventKey=key;
+  const box=$('convMessages');updateConvDOM(box,()=>{box.querySelectorAll('.conv-tool,.conv-error').forEach(n=>n.remove());const messageElements=new Map();box.querySelectorAll('.conv-msg[data-message-id]').forEach(node=>messageElements.set(node.dataset.messageId,node));for(const ev of visible){const p=ev.payload||{},messageId=p.assistant_message_id||convTurnMessages.get(ev.turn_id),anchor=messageElements.get(messageId);if(!anchor)continue;if(ev.type==='turn.failed'){const e=document.createElement('div');e.className='conv-error';e.textContent=p.message||'Codex 执行失败';box.insertBefore(e,anchor);continue;}const d=document.createElement('details');d.className='conv-tool';const title=p.command||p.kind||'文件变更';d.innerHTML='<summary>'+esc(title)+'</summary><pre>'+esc(convEventBody(p))+'</pre>';box.insertBefore(d,anchor);}});
+}
+function setConversationBusy(busy){const s=sessions.find(x=>x.id===sid);setConversationState(busy,!!s?.conversation_running);}
+function setConversationState(busy,sessionRunning){$('convSend').classList.toggle('hidden',busy);$('convStop').classList.toggle('hidden',!busy);const s=sessions.find(x=>x.id===sid);if(s){s.turn_running=busy;s.conversation_running=sessionRunning;s.isRunning=!!(s.terminal_running||sessionRunning);if(!s.isRunning)s.running_mode='';$('convInput').disabled=busy||!sessionRunning;$('convSend').disabled=!sessionRunning;updateCtrl(s);renderS();}}
+async function sendConversationMessage(){
+  if(!sid)return;const input=$('convInput'),content=input.value.trim();if(!content)return;
+  const r=await api('/api/sessions/'+sid+'/conversation/messages',{method:'POST',body:JSON.stringify({content})});
+  if(!r.ok){let e={};try{e=await r.json();}catch{}return alert(e.error||'发送失败');}
+  input.value='';setConversationBusy(true);pollConversation(sid,true);
+}
+async function stopConversation(){if(!sid)return;await api('/api/sessions/'+sid+'/conversation/stop',{method:'POST'});pollConversation(sid,true);}
 function agentProfiles(agent){return profiles.filter(p=>(p.agent||'claude')===agent);}
 function populateProfSelect(select,agent){if(!select)return;select.innerHTML='<option value="">'+(agent==='codex'?'Codex 默认配置':'Claude 默认配置')+'</option>'+agentProfiles(agent).map(p=>'<option value="'+escAttr(p.id)+'">'+esc(p.name)+'</option>').join('');}
 function updateTermTitle(s){$('termTitle').textContent=s.name+' · '+(s.agent==='codex'?'Codex':'Claude Code')+(s.profile_name?' ('+s.profile_name+')':'');}
@@ -342,9 +471,8 @@ async function doStart(){
   const response=await api('/api/sessions/'+sid+'/start',{method:'POST'});
   if(!response.ok){const e=await response.json();return alert(e.error||'启动失败');}
   const s=sessions.find(x=>x.id===sid);
-  if(s){s.isRunning=true;updateCtrl(s);}
-  initTerm();
-  if(usePolling)startPoll(sid);else connectWS(sid);
+  if(s){s.isRunning=true;s.running_mode=s.run_mode;s.terminal_running=s.run_mode==='terminal';s.conversation_running=s.run_mode==='conversation';updateCtrl(s);}
+  if(sessionView==='terminal'){initTerm();if(usePolling)startPoll(sid);else connectWS(sid);}else pollConversation(sid,true);
 }
 async function doStop(){
   if(!sid)return;
@@ -352,15 +480,15 @@ async function doStop(){
   if(!r.ok){try{const e=await r.json();alert(e.error||'停止失败');}catch{alert('停止失败');}return;}
   disconnectAll();
   const s=sessions.find(x=>x.id===sid);
-  if(s){s.isRunning=false;updateCtrl(s);}
+  if(s){s.isRunning=false;s.terminal_running=false;s.conversation_running=false;s.turn_running=false;s.running_mode='';updateCtrl(s);}
 }
-async function doDelete(){
-  if(!sid||!confirm('确定删除？'))return;
-  disconnectAll();
-  const r=await api('/api/sessions/'+sid,{method:'DELETE'});
+async function deleteSessionById(id){
+  const s=sessions.find(x=>x.id===id);if(!s||!confirm('确定删除会话“'+s.name+'”？'))return;
+  const deletingCurrent=id===sid;if(deletingCurrent){disconnectAll();stopConversationPoll();}
+  const r=await api('/api/sessions/'+id,{method:'DELETE'});
   if(!r.ok){try{const e=await r.json();alert(e.error||'删除失败');}catch{alert('删除失败');}return;}
-  sid=null;if(term){term.dispose();term=null;}
-  goSessions();
+  if(deletingCurrent){sid=null;if(term){term.dispose();term=null;}goSessions();return;}
+  await refresh();
 }
 function updateWsBtn(){
   const b=$('wsBtn');
@@ -374,7 +502,7 @@ function toggleWS(){
   updateWsBtn();
   if(sid){
     const s=sessions.find(x=>x.id===sid);
-    if(s&&s.isRunning){disconnectAll();if(usePolling)startPoll(sid);else connectWS(sid);}
+    if(s&&s.terminal_running){disconnectAll();if(usePolling)startPoll(sid);else connectWS(sid);}
   }
 }
 
@@ -484,7 +612,7 @@ function disconnectAll(){disconnectWS();stopPoll();}
 function handleExit(code){
   if(term)term.write('\r\n\x1b[33m[进程退出, code='+(code||0)+']\x1b[0m\r\n');
   const s=sessions.find(x=>x.id===sid);
-  if(s){s.isRunning=false;updateCtrl(s);}
+  if(s){s.terminal_running=false;s.isRunning=!!s.conversation_running;updateCtrl(s);}
   api('/api/app-config').then(r=>r.json()).then(c=>{appCfg=c;POLL_MS=c.pollIntervalMs||300;});
   refresh();
 }
@@ -495,9 +623,9 @@ function onFab(){if(curPage==='profiles')newProfSheet();else newSessionSheet();}
 // ============ Session Sheet ============
 function newSessionSheet(){
   const defaultDir=appDefaults.workingDir||appCfg.defaultWorkingDir||'/home/user/code';
-  sheet(`<h3>新建会话</h3><label>名称</label><input id="sName" placeholder="my-project"><label>智能体</label><select id="sAgent"><option value="claude">Claude Code</option><option value="codex">Codex</option></select><div id="sProfGroup"><label>配置</label><select id="sProf"></select></div><label>工作目录</label><input id="sDir" value="${escAttr(defaultDir)}" placeholder="/home/user/code"><div class="sheet-btns"><button class="btn-cancel" id="shCancel">取消</button><button class="btn-ok" id="shOk">创建</button></div>`);
+  sheet(`<h3>新建会话</h3><label>名称</label><input id="sName" placeholder="my-project"><label>智能体</label><select id="sAgent"><option value="claude">Claude Code</option><option value="codex">Codex</option></select><div id="sProfGroup"><label>配置</label><select id="sProf"></select></div><div id="sModeGroup" class="hidden"><label>启动模式</label><select id="sMode"><option value="terminal">原生终端</option><option value="conversation">对话模式</option></select><small>运行中不能切换，需停止后重新选择并启动。</small></div><label>工作目录</label><input id="sDir" value="${escAttr(defaultDir)}" placeholder="/home/user/code"><div class="sheet-btns"><button class="btn-cancel" id="shCancel">取消</button><button class="btn-ok" id="shOk">创建</button></div>`);
   $('sAgent').value=appCfg.defaultAgent||'claude';
-  const syncAgent=()=>populateProfSelect($('sProf'),$('sAgent').value);
+  const syncAgent=()=>{const agent=$('sAgent').value;populateProfSelect($('sProf'),agent);$('sModeGroup').classList.toggle('hidden',agent!=='codex'||!appCfg.experimental?.conversationMode);if(agent!=='codex')$('sMode').value='terminal';};
   $('sAgent').addEventListener('change',syncAgent);syncAgent();
   $('shCancel').addEventListener('click',closeSheet);
   $('shOk').addEventListener('click',createSession);
@@ -506,15 +634,29 @@ async function createSession(){
   const name=$('sName').value.trim();if(!name)return alert('请输入名称');
   const profile_id=$('sProf').value||null;
   const agent=$('sAgent').value;
+  const run_mode=agent==='codex'&&appCfg.experimental?.conversationMode?$('sMode').value:'terminal';
   const working_dir=$('sDir').value.trim()||appDefaults.workingDir||appCfg.defaultWorkingDir||'/home/user/code';
-  const r=await api('/api/sessions',{method:'POST',body:JSON.stringify({name,agent,profile_id,working_dir})});
+  const r=await api('/api/sessions',{method:'POST',body:JSON.stringify({name,agent,profile_id,working_dir,run_mode})});
   if(!r.ok){const e=await r.json();return alert(e.error||'失败');}
   const data=await r.json();
-  const startResponse=await api('/api/sessions/'+data.id+'/start',{method:'POST'});
-  if(!startResponse.ok){const e=await startResponse.json();alert(e.error||'会话已创建，但启动失败');}
   closeSheet();await refresh();
   const s=sessions.find(x=>x.id===data.id);
   if(s)goTerm(s);
+}
+
+function editSessionSheet(id){
+  const s=sessions.find(x=>x.id===id);if(!s)return;
+  if(s.isRunning)return alert('请先停止会话再编辑');
+  sheet(`<h3>编辑会话: ${esc(s.name)}</h3><label>名称</label><input id="sEditName" value="${escAttr(s.name)}"><div class="sheet-btns"><button class="btn-cancel" id="shCancel">取消</button><button class="btn-ok" id="shOk">保存</button></div>`);
+  $('shCancel').addEventListener('click',closeSheet);
+  $('shOk').addEventListener('click',()=>updateSession(id));
+}
+async function updateSession(id){
+  const name=$('sEditName').value.trim();
+  if(!name)return alert('请输入名称');
+  const r=await api('/api/sessions/'+id,{method:'PATCH',body:JSON.stringify({name})});
+  if(!r.ok){let e={};try{e=await r.json();}catch{}return alert(e.error||'保存失败');}
+  closeSheet();await refresh();
 }
 
 // ============ Profile Sheet ============

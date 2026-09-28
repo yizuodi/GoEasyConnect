@@ -52,6 +52,9 @@
   "fileBrowser": {
     "url": ""
   },
+  "experimental": {
+    "conversationMode": false
+  },
   "logging": {
     "path": "./error.log",
     "maxSizeMB": 10

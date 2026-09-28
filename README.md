@@ -14,6 +14,7 @@ GoEasyConnect 是一个面向小型、自托管、单机环境的 Claude Code �
 
 - Claude Code 与 Codex 会话创建、启动、停止、恢复及终端访问
 - 桌面端和移动端界面，支持 WebSocket 与 HTTP 轮询
+- 可选的 Codex 对话模式，保留原生终端作为回退
 - Claude JSON 和 Codex TOML 配置档
 - Codex 自定义 OpenAI-compatible Provider，无需执行 `codex login`
 - API Key 仅注入目标进程，不写入 Codex TOML、命令参数或错误日志
@@ -84,6 +85,26 @@ openssl rand -base64 32
   Codex 的配置文件会移除这些字段。
 
 完整设置及安全占位值见 [`config.example.json`](config.example.json)。
+
+### Codex 对话模式
+
+在 `config.json` 中显式开启后，新建或已停止的 Codex 会话可以选择“原生终端”或
+“对话模式”作为启动模式：
+
+```json
+"experimental": {
+  "conversationMode": true
+}
+```
+
+对话模式会启动一个常驻的 `codex app-server`，保存结构化消息、命令和文件变更
+事件；原生终端模式仍直接运行官方 Codex TUI。两种模式沿用同一个 Codex thread
+ID，因此停止后切换模式仍能继续已提交的对话历史，但不会同步两侧未发送的草稿。
+模式在运行中锁定，必须先停止会话才能切换并重新启动。
+
+第一版仅支持 Codex 对话，且启动前必须启用 `Skip Perms`；这等同于允许 Codex
+无需审批执行命令和修改文件，请只在受信任的单用户环境中使用。停止对话中的回复
+只会调用 `turn/interrupt`，不会关闭 app-server；顶部“停止”才会结束整个会话。
 
 ## systemd 部署
 

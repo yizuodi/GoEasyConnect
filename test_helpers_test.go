@@ -42,6 +42,7 @@ func testApp(t *testing.T, cfg *Config) *App {
 		t.Fatalf("newApp: %v", err)
 	}
 	t.Cleanup(func() {
+		app.conversations.stopAll()
 		app.sessions.stopAll()
 		_ = app.store.Close()
 	})

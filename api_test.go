@@ -139,6 +139,120 @@ func TestPTYAndPollingLifecycle(t *testing.T) {
 	}
 }
 
+func TestSessionRunModeAPI(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Experimental.ConversationMode = true
+	app := testApp(t, cfg)
+	server := httptest.NewServer(app.routes())
+	defer server.Close()
+
+	claudeResponse := requestJSON(t, server.URL, cfg.Auth.Password, http.MethodPost, "/api/sessions", map[string]any{
+		"name": "claude-conversation", "agent": "claude", "working_dir": cfg.DefaultWorkingDir, "run_mode": "conversation",
+	})
+	if claudeResponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("Claude conversation status=%d body=%s", claudeResponse.StatusCode, readBody(t, claudeResponse))
+	}
+	claudeResponse.Body.Close()
+
+	response := requestJSON(t, server.URL, cfg.Auth.Password, http.MethodPost, "/api/sessions", map[string]any{
+		"name": "codex-mode", "agent": "codex", "working_dir": cfg.DefaultWorkingDir,
+	})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("create Codex session status=%d body=%s", response.StatusCode, readBody(t, response))
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	decodeBody(t, response, &created)
+	stored, err := app.store.getSession(created.ID)
+	if err != nil || stored.RunMode != "terminal" {
+		t.Fatalf("default mode session=%#v err=%v", stored, err)
+	}
+
+	response = requestJSON(t, server.URL, cfg.Auth.Password, http.MethodPatch, "/api/sessions/"+created.ID+"/mode", map[string]any{"mode": "conversation"})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("change mode status=%d body=%s", response.StatusCode, readBody(t, response))
+	}
+	response.Body.Close()
+	stored, err = app.store.getSession(created.ID)
+	if err != nil || stored.RunMode != "conversation" {
+		t.Fatalf("updated mode session=%#v err=%v", stored, err)
+	}
+
+	app.conversations.mu.Lock()
+	app.conversations.running[created.ID] = &AppServerSession{sessionID: created.ID}
+	app.conversations.mu.Unlock()
+	response = requestJSON(t, server.URL, cfg.Auth.Password, http.MethodPatch, "/api/sessions/"+created.ID+"/mode", map[string]any{"mode": "terminal"})
+	if response.StatusCode != http.StatusConflict {
+		t.Fatalf("running mode change status=%d body=%s", response.StatusCode, readBody(t, response))
+	}
+	response.Body.Close()
+	app.conversations.mu.Lock()
+	delete(app.conversations.running, created.ID)
+	app.conversations.mu.Unlock()
+}
+
+func TestUpdateSessionAPI(t *testing.T) {
+	cfg := testConfig(t)
+	app := testApp(t, cfg)
+	server := httptest.NewServer(app.routes())
+	defer server.Close()
+
+	response := requestJSON(t, server.URL, cfg.Auth.Password, http.MethodPost, "/api/sessions", map[string]any{
+		"name": "before", "agent": "codex", "working_dir": cfg.DefaultWorkingDir,
+	})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("create session status=%d body=%s", response.StatusCode, readBody(t, response))
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	decodeBody(t, response, &created)
+
+	attemptedDir := filepath.Join(cfg.BaseDir, "renamed-worktree")
+	response = requestJSON(t, server.URL, cfg.Auth.Password, http.MethodPatch, "/api/sessions/"+created.ID, map[string]any{
+		"name": "after", "working_dir": attemptedDir,
+	})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("update session status=%d body=%s", response.StatusCode, readBody(t, response))
+	}
+	var updated Session
+	decodeBody(t, response, &updated)
+	if updated.Name != "after" || updated.WorkingDir != cfg.DefaultWorkingDir {
+		t.Fatalf("updated session=%#v", updated)
+	}
+	if _, err := os.Stat(attemptedDir); !os.IsNotExist(err) {
+		t.Fatalf("working directory edit was accepted: err=%v", err)
+	}
+
+	response = requestJSON(t, server.URL, cfg.Auth.Password, http.MethodPatch, "/api/sessions/"+created.ID, map[string]any{
+		"name": "  ",
+	})
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty name status=%d body=%s", response.StatusCode, readBody(t, response))
+	}
+	response.Body.Close()
+
+	app.conversations.mu.Lock()
+	app.conversations.running[created.ID] = &AppServerSession{sessionID: created.ID}
+	app.conversations.mu.Unlock()
+	response = requestJSON(t, server.URL, cfg.Auth.Password, http.MethodPatch, "/api/sessions/"+created.ID, map[string]any{
+		"name": "while-running",
+	})
+	if response.StatusCode != http.StatusConflict {
+		t.Fatalf("running update status=%d body=%s", response.StatusCode, readBody(t, response))
+	}
+	response.Body.Close()
+	app.conversations.mu.Lock()
+	delete(app.conversations.running, created.ID)
+	app.conversations.mu.Unlock()
+
+	stored, err := app.store.getSession(created.ID)
+	if err != nil || stored.Name != "after" || stored.WorkingDir != cfg.DefaultWorkingDir {
+		t.Fatalf("stored session=%#v err=%v", stored, err)
+	}
+}
+
 func TestCustomCodexProfileDoesNotWriteSecretToDiskOrArgs(t *testing.T) {
 	cfg := testConfig(t)
 	app := testApp(t, cfg)

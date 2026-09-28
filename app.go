@@ -11,15 +11,16 @@ import (
 )
 
 type App struct {
-	cfg        *Config
-	store      *Store
-	logger     *log.Logger
-	sessions   *SessionManager
-	server     *http.Server
-	wsMu       sync.Mutex
-	wsClients  map[*wsClient]struct{}
-	wsTicketMu sync.Mutex
-	wsTickets  map[string]time.Time
+	cfg           *Config
+	store         *Store
+	logger        *log.Logger
+	sessions      *SessionManager
+	conversations *ConversationManager
+	server        *http.Server
+	wsMu          sync.Mutex
+	wsClients     map[*wsClient]struct{}
+	wsTicketMu    sync.Mutex
+	wsTickets     map[string]time.Time
 }
 
 func newApp(cfg *Config, logger *log.Logger) (*App, error) {
@@ -39,6 +40,7 @@ func newApp(cfg *Config, logger *log.Logger) (*App, error) {
 		wsTickets: make(map[string]time.Time),
 	}
 	app.sessions = newSessionManager(app)
+	app.conversations = newConversationManager(app)
 	profiles, err := store.listProfiles("")
 	if err != nil {
 		_ = store.Close()
@@ -59,6 +61,7 @@ func (a *App) close(ctx context.Context) error {
 		}
 	}
 	a.closeWebSockets()
+	a.conversations.stopAll()
 	a.sessions.stopAll()
 	return a.store.Close()
 }

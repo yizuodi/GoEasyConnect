@@ -40,7 +40,7 @@ INSERT INTO sessions(id,name,profile_id,working_dir,status) VALUES('s1','legacy-
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.Agent != "claude" || session.Status != "stopped" || session.SkipPermissions != 0 {
+	if session.Agent != "claude" || session.Status != "stopped" || session.SkipPermissions != 0 || session.RunMode != "terminal" {
 		t.Fatalf("unexpected migrated session: %#v", session)
 	}
 	if mode := fileMode(t, dbPath); mode != 0o600 {

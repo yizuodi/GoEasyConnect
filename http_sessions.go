@@ -18,7 +18,16 @@ func (a *App) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	for index := range sessions {
-		sessions[index].IsRunning = a.sessions.IsRunning(sessions[index].ID)
+		sessions[index].TerminalRunning = a.sessions.IsRunning(sessions[index].ID)
+		sessions[index].ConversationRunning = a.conversations.IsRunning(sessions[index].ID)
+		sessions[index].TurnRunning = a.conversations.IsTurnRunning(sessions[index].ID)
+		sessions[index].IsRunning = sessions[index].TerminalRunning || sessions[index].ConversationRunning
+		if sessions[index].TerminalRunning {
+			sessions[index].RunningMode = "terminal"
+		}
+		if sessions[index].ConversationRunning {
+			sessions[index].RunningMode = "conversation"
+		}
 		if sessions[index].IsRunning {
 			sessions[index].Status = "running"
 		} else {
@@ -33,6 +42,7 @@ type createSessionRequest struct {
 	Agent      string  `json:"agent"`
 	ProfileID  *string `json:"profile_id"`
 	WorkingDir string  `json:"working_dir"`
+	RunMode    string  `json:"run_mode"`
 }
 
 func (a *App) handleCreateSession(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +60,21 @@ func (a *App) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if !validAgent(request.Agent) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Agent must be claude or codex"})
+		return
+	}
+	if request.RunMode == "" {
+		request.RunMode = "terminal"
+	}
+	if request.RunMode != "terminal" && request.RunMode != "conversation" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Mode must be terminal or conversation"})
+		return
+	}
+	if request.RunMode == "conversation" && request.Agent != "codex" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Conversation mode currently supports Codex only"})
+		return
+	}
+	if request.RunMode == "conversation" && !a.cfg.Experimental.ConversationMode {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Conversation mode is disabled"})
 		return
 	}
 	var profileName *string
@@ -84,12 +109,52 @@ func (a *App) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Failed to create working directory: %s (%s)", workDir, err.Error())})
 		return
 	}
-	session := Session{ID: uuid.NewString(), Name: request.Name, Agent: request.Agent, ProfileID: request.ProfileID, WorkingDir: workDir, ProfileName: profileName}
+	session := Session{ID: uuid.NewString(), Name: request.Name, Agent: request.Agent, ProfileID: request.ProfileID, WorkingDir: workDir, ProfileName: profileName, RunMode: request.RunMode}
 	if err := a.store.createSession(session); err != nil {
 		a.writeInternalError(w, "create session", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": session.ID, "name": session.Name, "agent": session.Agent, "profile_name": session.ProfileName})
+	writeJSON(w, http.StatusOK, map[string]any{"id": session.ID, "name": session.Name, "agent": session.Agent, "profile_name": session.ProfileName, "run_mode": session.RunMode})
+}
+
+type updateSessionRequest struct {
+	Name string `json:"name"`
+}
+
+func (a *App) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	session, err := a.store.getSession(id)
+	if isNotFound(err) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Session not found"})
+		return
+	}
+	if err != nil {
+		a.writeInternalError(w, "get session for update", err)
+		return
+	}
+	if a.sessions.IsRunning(id) || a.conversations.IsRunning(id) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Stop the session before editing it"})
+		return
+	}
+	var request updateSessionRequest
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	request.Name = strings.TrimSpace(request.Name)
+	if request.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Name is required"})
+		return
+	}
+	if err := a.store.updateSession(id, request.Name); err != nil {
+		if isNotFound(err) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Session not found"})
+			return
+		}
+		a.writeInternalError(w, "update session", err)
+		return
+	}
+	session.Name = request.Name
+	writeJSON(w, http.StatusOK, session)
 }
 
 func (a *App) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
@@ -102,6 +167,7 @@ func (a *App) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.sessions.Stop(id)
+	a.conversations.StopSession(id)
 	if err := a.store.deleteSession(id); err != nil {
 		a.writeInternalError(w, "delete session", err)
 		return
@@ -119,16 +185,22 @@ func (a *App) handleStartSession(w http.ResponseWriter, r *http.Request) {
 		a.writeInternalError(w, "get session for start", err)
 		return
 	}
-	if a.sessions.IsRunning(session.ID) {
+	if a.sessions.IsRunning(session.ID) || a.conversations.IsRunning(session.ID) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Session already running"})
 		return
 	}
-	if err := a.sessions.Start(session); err != nil {
-		a.logError("start "+session.Agent+" session", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to start %s: %s", agentLabel(session.Agent), err.Error())})
+	var startErr error
+	if session.RunMode == "conversation" {
+		startErr = a.conversations.StartSession(session)
+	} else {
+		startErr = a.sessions.Start(session)
+	}
+	if startErr != nil {
+		a.logError("start "+session.Agent+" session", startErr)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to start %s: %s", agentLabel(session.Agent), startErr.Error())})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "running"})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "running", "running_mode": session.RunMode})
 }
 
 func (a *App) handleStopSession(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +214,51 @@ func (a *App) handleStopSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.sessions.Stop(session.ID)
+	a.conversations.StopSession(session.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "stopped"})
+}
+
+func (a *App) handleSessionMode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	session, err := a.store.getSession(id)
+	if isNotFound(err) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Session not found"})
+		return
+	}
+	if err != nil {
+		a.writeInternalError(w, "get session for mode change", err)
+		return
+	}
+	if a.sessions.IsRunning(id) || a.conversations.IsRunning(id) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Stop the session before changing mode"})
+		return
+	}
+	var request struct {
+		Mode string `json:"mode"`
+	}
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	if request.Mode != "terminal" && request.Mode != "conversation" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Mode must be terminal or conversation"})
+		return
+	}
+	if request.Mode == "conversation" {
+		if !a.cfg.Experimental.ConversationMode {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Conversation mode is disabled"})
+			return
+		}
+		if session.Agent != "codex" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Conversation mode currently supports Codex only"})
+			return
+		}
+	}
+	if err := a.store.setSessionRunMode(id, request.Mode); err != nil {
+		a.writeInternalError(w, "set session mode", err)
+		return
+	}
+	session.RunMode = request.Mode
+	writeJSON(w, http.StatusOK, session)
 }
 
 func (a *App) handleSkipPermissions(w http.ResponseWriter, r *http.Request) {
@@ -154,7 +270,7 @@ func (a *App) handleSkipPermissions(w http.ResponseWriter, r *http.Request) {
 		a.writeInternalError(w, "get session for permissions", err)
 		return
 	}
-	if a.sessions.IsRunning(id) {
+	if a.sessions.IsRunning(id) || a.conversations.IsRunning(id) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Cannot change while running"})
 		return
 	}
@@ -186,7 +302,7 @@ func (a *App) handleSessionProfile(w http.ResponseWriter, r *http.Request) {
 		a.writeInternalError(w, "get session for profile change", err)
 		return
 	}
-	if a.sessions.IsRunning(id) {
+	if a.sessions.IsRunning(id) || a.conversations.IsRunning(id) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Cannot change profile while running"})
 		return
 	}
@@ -278,6 +394,122 @@ func (a *App) handleCreateMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	terminal.broadcast(map[string]any{"type": "user_message", "id": messageID, "session_id": session.ID, "role": "user", "content": request.Content})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "assistantMsgId": assistantID})
+}
+
+func (a *App) handleListConversationMessages(w http.ResponseWriter, r *http.Request) {
+	if !a.cfg.Experimental.ConversationMode {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Conversation mode is disabled"})
+		return
+	}
+	if _, err := a.store.getSession(r.PathValue("id")); isNotFound(err) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Session not found"})
+		return
+	} else if err != nil {
+		a.writeInternalError(w, "get conversation session", err)
+		return
+	}
+	limit := parseBoundedInt(r.URL.Query().Get("limit"), 500, 1, 1000)
+	offset := parseBoundedInt(r.URL.Query().Get("offset"), 0, 0, 1<<30)
+	messages, err := a.store.listMessagesByChannel(r.PathValue("id"), "conversation", limit, offset)
+	if err != nil {
+		a.writeInternalError(w, "list conversation messages", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": messages, "running": a.conversations.IsTurnRunning(r.PathValue("id")), "session_running": a.conversations.IsRunning(r.PathValue("id"))})
+}
+
+func (a *App) handleCreateConversationMessage(w http.ResponseWriter, r *http.Request) {
+	if !a.cfg.Experimental.ConversationMode {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Conversation mode is disabled"})
+		return
+	}
+	var request struct {
+		Content string `json:"content"`
+	}
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	request.Content = strings.TrimSpace(request.Content)
+	if request.Content == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Content is required"})
+		return
+	}
+	if len(request.Content) > 256*1024 {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "Message is too large"})
+		return
+	}
+	session, err := a.store.getSession(r.PathValue("id"))
+	if isNotFound(err) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Session not found"})
+		return
+	}
+	if err != nil {
+		a.writeInternalError(w, "get conversation session", err)
+		return
+	}
+	if session.Agent != "codex" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Conversation mode currently supports Codex only"})
+		return
+	}
+	if session.RunMode != "conversation" || !a.conversations.IsRunning(session.ID) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Start the session in conversation mode before sending a message"})
+		return
+	}
+	if a.conversations.IsTurnRunning(session.ID) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "A conversation turn is already running"})
+		return
+	}
+	userID, assistantID := uuid.NewString(), uuid.NewString()
+	if err := a.store.createConversationMessage(Message{ID: userID, SessionID: session.ID, Role: "user", Content: request.Content, SourceID: userID}); err != nil {
+		a.writeInternalError(w, "save conversation message", err)
+		return
+	}
+	if err := a.store.createConversationMessage(Message{ID: assistantID, SessionID: session.ID, Role: "assistant", Content: ""}); err != nil {
+		_ = a.store.deleteMessage(userID)
+		a.writeInternalError(w, "create conversation response", err)
+		return
+	}
+	turnID, err := a.conversations.StartTurn(session.ID, request.Content, assistantID, userID)
+	if err != nil {
+		_ = a.store.deleteMessage(userID)
+		_ = a.store.deleteMessage(assistantID)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"ok": true, "turn_id": turnID, "user_message_id": userID, "assistant_message_id": assistantID,
+	})
+}
+
+func (a *App) handleListConversationEvents(w http.ResponseWriter, r *http.Request) {
+	if !a.cfg.Experimental.ConversationMode {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Conversation mode is disabled"})
+		return
+	}
+	if _, err := a.store.getSession(r.PathValue("id")); isNotFound(err) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Session not found"})
+		return
+	} else if err != nil {
+		a.writeInternalError(w, "get conversation session", err)
+		return
+	}
+	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	limit := parseBoundedInt(r.URL.Query().Get("limit"), 200, 1, 1000)
+	events, err := a.store.listConversationEvents(r.PathValue("id"), after, limit)
+	if err != nil {
+		a.writeInternalError(w, "list conversation events", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"events": events, "running": a.conversations.IsTurnRunning(r.PathValue("id")), "session_running": a.conversations.IsRunning(r.PathValue("id"))})
+}
+
+func (a *App) handleStopConversation(w http.ResponseWriter, r *http.Request) {
+	if !a.cfg.Experimental.ConversationMode {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Conversation mode is disabled"})
+		return
+	}
+	interrupted := a.conversations.InterruptTurn(r.PathValue("id"))
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true, "interrupted": interrupted})
 }
 
 func (a *App) handlePollOutput(w http.ResponseWriter, r *http.Request) {

@@ -11,20 +11,25 @@ type Profile struct {
 }
 
 type Session struct {
-	ID              string  `json:"id"`
-	Name            string  `json:"name"`
-	ProfileID       *string `json:"profile_id"`
-	WorkingDir      string  `json:"working_dir"`
-	Status          string  `json:"status"`
-	Agent           string  `json:"agent"`
-	ClaudePID       *int64  `json:"claude_pid"`
-	ClaudeSessionID string  `json:"claude_session_id"`
-	CodexSessionID  string  `json:"codex_session_id"`
-	SkipPermissions int     `json:"skip_permissions"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
-	ProfileName     *string `json:"profile_name"`
-	IsRunning       bool    `json:"isRunning"`
+	ID                  string  `json:"id"`
+	Name                string  `json:"name"`
+	ProfileID           *string `json:"profile_id"`
+	WorkingDir          string  `json:"working_dir"`
+	Status              string  `json:"status"`
+	Agent               string  `json:"agent"`
+	ClaudePID           *int64  `json:"claude_pid"`
+	ClaudeSessionID     string  `json:"claude_session_id"`
+	CodexSessionID      string  `json:"codex_session_id"`
+	RunMode             string  `json:"run_mode"`
+	SkipPermissions     int     `json:"skip_permissions"`
+	CreatedAt           string  `json:"created_at"`
+	UpdatedAt           string  `json:"updated_at"`
+	ProfileName         *string `json:"profile_name"`
+	IsRunning           bool    `json:"isRunning"`
+	TerminalRunning     bool    `json:"terminal_running"`
+	ConversationRunning bool    `json:"conversation_running"`
+	TurnRunning         bool    `json:"turn_running"`
+	RunningMode         string  `json:"running_mode,omitempty"`
 }
 
 type Message struct {
@@ -32,5 +37,17 @@ type Message struct {
 	SessionID string `json:"session_id"`
 	Role      string `json:"role"`
 	Content   string `json:"content"`
+	SourceID  string `json:"-"`
+	CreatedAt string `json:"created_at"`
+}
+
+type ConversationEvent struct {
+	Seq       int64  `json:"seq"`
+	ID        string `json:"id"`
+	SessionID string `json:"session_id"`
+	TurnID    string `json:"turn_id,omitempty"`
+	ItemID    string `json:"item_id,omitempty"`
+	Type      string `json:"type"`
+	Payload   any    `json:"payload"`
 	CreatedAt string `json:"created_at"`
 }

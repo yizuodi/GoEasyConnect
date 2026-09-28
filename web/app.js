@@ -12,6 +12,15 @@ let appConfig = {};  // from /api/config
 let appDefaults = {}; // from /api/defaults
 let sidebarCollapsed = localStorage.getItem('ec_sidebar_collapsed') === 'true';
 let terminalFitTimer = null;
+let sessionMode = 'terminal';
+let conversationTimer = null;
+let conversationSeq = 0;
+let conversationEvents = [];
+let conversationMessageKey = '';
+let conversationEventKey = '';
+let conversationAutoScroll = true;
+let conversationLastScrollTop = 0;
+let conversationTurnMessages = new Map();
 
 // Polling state
 let usePolling = localStorage.getItem('ec_polling') === 'true';
@@ -69,14 +78,24 @@ function showApp() {
       const b = c.branding;
       document.title = b.documentTitle || 'EasyConnect';
     }
-  });
+  }).catch(() => {}).then(() => loadSessions());
   api('/api/defaults').then(r => r.json()).then(d => {
     appDefaults = d;
   });
   updatePollToggle();
-  loadSessions();
   loadProfiles();
   notifyAppReady();
+  const input = document.getElementById('conversationInput');
+  if (input && !input.dataset.bound) {
+    input.dataset.bound = 'true';
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        sendConversationMessage();
+      }
+    });
+  }
+  bindConversationScrollBehavior();
 }
 
 // ============ View Controls ============
@@ -194,7 +213,7 @@ function togglePolling() {
   // Reconnect current session with new mode
   if (currentSessionId) {
     const s = sessions.find(x => x.id === currentSessionId);
-    if (s && s.isRunning) {
+    if (s && s.terminal_running) {
       disconnectAll();
       if (usePolling) startPolling(currentSessionId);
       else connectWS(currentSessionId);
@@ -295,30 +314,75 @@ async function loadSessions() {
   const r = await api('/api/sessions');
   if (r.ok) sessions = await r.json();
   if (currentTab === 'sessions') renderSessions();
+  if (!currentSessionId) {
+    const requestedID = new URL(window.location.href).searchParams.get('session');
+    if (requestedID && sessions.some(session => session.id === requestedID)) {
+      await selectSession(requestedID);
+    } else if (requestedID) {
+      updateSessionURL(null);
+    }
+  }
+}
+
+function updateSessionURL(id, mode = '') {
+  const url = new URL(window.location.href);
+  if (id) {
+    url.searchParams.set('session', id);
+    if (mode === 'terminal' || mode === 'conversation') url.searchParams.set('mode', mode);
+    else url.searchParams.delete('mode');
+  } else {
+    url.searchParams.delete('session');
+    url.searchParams.delete('mode');
+  }
+  window.history.replaceState({}, '', url);
 }
 
 function renderSessions() {
+  if (currentTab !== 'sessions') return;
   const el = document.getElementById('sidebarContent');
   if (!sessions.length) {
     el.innerHTML = '<div style="padding:20px;color:var(--text-muted);text-align:center;">暂无会话</div>';
     return;
   }
   el.innerHTML = sessions.map(s => `
-    <div class="session-item ${s.id === currentSessionId ? 'active' : ''}" data-session-id="${escAttr(s.id)}">
-      <span class="session-name"><span class="agent-badge ${s.agent === 'codex' ? 'codex' : 'claude'}">${s.agent === 'codex' ? 'Codex' : 'Claude'}</span><span class="session-label">${esc(s.name)}</span></span>
-      <div class="session-status ${s.isRunning ? 'running' : 'stopped'}" title="${s.isRunning ? '运行中' : '已停止'}"></div>
+    <div class="session-item ${s.id === currentSessionId ? 'active' : ''}" data-session-id="${escAttr(s.id)}" role="button" tabindex="0" aria-label="打开会话 ${escAttr(s.name)}">
+      <div class="session-main">
+        <span class="session-name"><span class="agent-badge ${s.agent === 'codex' ? 'codex' : 'claude'}">${s.agent === 'codex' ? 'Codex' : 'Claude'}</span><span class="session-label">${esc(s.name)}</span></span>
+        <span class="session-status ${s.isRunning ? 'running' : 'stopped'}" title="${s.isRunning ? '运行中' : '已停止'}"></span>
+      </div>
+      <div class="session-actions">
+        <button class="btn btn-sm btn-ghost js-edit-session" data-session-id="${escAttr(s.id)}" ${s.isRunning ? 'disabled title="请先停止会话"' : ''}>编辑</button>
+        <button class="btn btn-sm btn-danger js-delete-session" data-session-id="${escAttr(s.id)}">删除</button>
+      </div>
     </div>
   `).join('');
   el.querySelectorAll('.session-item').forEach(item => {
-    item.addEventListener('click', () => selectSession(item.dataset.sessionId));
+    item.addEventListener('click', event => {
+      if (!event.target.closest('.js-edit-session,.js-delete-session')) selectSession(item.dataset.sessionId);
+    });
+    item.addEventListener('keydown', event => {
+      if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('.js-edit-session,.js-delete-session')) {
+        event.preventDefault();
+        selectSession(item.dataset.sessionId);
+      }
+    });
+  });
+  el.querySelectorAll('.js-edit-session').forEach(button => {
+    button.addEventListener('click', () => editSession(button.dataset.sessionId));
+  });
+  el.querySelectorAll('.js-delete-session').forEach(button => {
+    button.addEventListener('click', () => deleteSessionById(button.dataset.sessionId));
   });
 }
 
 async function selectSession(id) {
   currentSessionId = id;
   const s = sessions.find(x => x.id === id);
-  if (!s) return;
-
+  if (!s) {
+    currentSessionId = null;
+    updateSessionURL(null);
+    return;
+  }
   renderSessions();
 
   document.getElementById('emptyState').classList.add('hidden');
@@ -326,31 +390,13 @@ async function selectSession(id) {
   document.getElementById('sessionView').style.display = 'flex';
   updateSessionTitle(s);
 
-  updateSessionControls(s);
-
-  initTerminal();
-
-  // Load history messages into terminal
-  const r = await api(`/api/sessions/${id}/messages`);
-  let msgs = [];
-  if (r.ok) msgs = await r.json();
-
-  msgs.forEach(m => {
-    if (m.role === 'user') {
-      term.write('\x1b[1;36m> ' + m.content + '\x1b[0m\r\n');
-    } else if (m.content) {
-      term.write(m.content);
-    }
-  });
-
-  // Connect with current mode
   disconnectAll();
-  if (s.isRunning) {
-    if (usePolling) startPolling(id);
-    else connectWS(id);
-  }
-
-  setTimeout(() => { try { fitAddon.fit(); } catch {} }, 100);
+  stopConversationPolling();
+  const conversationEnabled = Boolean(appConfig.experimental?.conversationMode && s.agent === 'codex');
+  document.getElementById('sessionModeSwitch').classList.toggle('hidden', !conversationEnabled);
+  sessionMode = conversationEnabled ? (s.running_mode || s.run_mode || 'terminal') : 'terminal';
+  updateSessionControls(s);
+  await switchSessionMode(sessionMode, false);
 }
 
 function updateSessionControls(s) {
@@ -377,6 +423,285 @@ function updateSessionControls(s) {
     sel.value = s.profile_id || '';
     updateSessionTitle(s);
   }
+  const modeSwitch = document.getElementById('sessionModeSwitch');
+  modeSwitch.classList.toggle('disabled', running);
+  for (const button of modeSwitch.querySelectorAll('button')) button.disabled = running;
+  updateConversationWarning(s);
+}
+
+function updateConversationWarning(s) {
+  const warning = document.getElementById('conversationWarning');
+  if (!warning || !s) return;
+  const warnings = [];
+  if (!s.isRunning) warnings.push('点击“启动”后才能发送消息；切换模式需要先停止会话。');
+  if (!s.skip_permissions) warnings.push('对话模式需要先开启 Skip Perms。');
+  warning.textContent = warnings.join(' ');
+  warning.classList.toggle('hidden', warnings.length === 0);
+}
+
+async function switchSessionMode(mode, remember = true) {
+  const s = sessions.find(item => item.id === currentSessionId);
+  if (!s) return;
+  if (s.isRunning && mode !== (s.running_mode || s.run_mode)) return;
+  if (remember && mode !== s.run_mode) {
+    const response = await api(`/api/sessions/${currentSessionId}/mode`, {
+      method: 'PATCH', body: JSON.stringify({ mode })
+    });
+    if (!response.ok) {
+      let error = {}; try { error = await response.json(); } catch {}
+      alert(error.error || '切换模式失败');
+      return;
+    }
+    s.run_mode = mode;
+  }
+  sessionMode = mode;
+  updateSessionURL(currentSessionId, mode);
+  disconnectAll();
+  stopConversationPolling();
+  updateSessionControls(s);
+  document.getElementById('conversationModeBtn').classList.toggle('active', mode === 'conversation');
+  document.getElementById('terminalModeBtn').classList.toggle('active', mode === 'terminal');
+  document.getElementById('terminalContainer').classList.toggle('hidden', mode !== 'terminal');
+  document.getElementById('conversationPanel').classList.toggle('hidden', mode !== 'conversation');
+  if (mode === 'conversation') {
+    if (term) { term.dispose(); term = null; }
+    conversationSeq = 0;
+    conversationEvents = [];
+    conversationMessageKey = '';
+    conversationEventKey = '';
+    conversationAutoScroll = true;
+    conversationLastScrollTop = 0;
+    conversationTurnMessages = new Map();
+    updateConversationWarning(s);
+    await pollConversation(currentSessionId, true);
+    return;
+  }
+  initTerminal();
+  const response = await api(`/api/sessions/${currentSessionId}/messages`);
+  const messages = response.ok ? await response.json() : [];
+  messages.forEach(message => {
+    if (message.role === 'user') term.write('\x1b[1;36m> ' + message.content + '\x1b[0m\r\n');
+    else if (message.content) term.write(message.content);
+  });
+  if (s.isRunning && (s.running_mode || s.run_mode) === 'terminal') {
+    if (usePolling) startPolling(currentSessionId);
+    else connectWS(currentSessionId);
+  }
+  scheduleTerminalFit(100);
+}
+
+function bindConversationScrollBehavior() {
+  const container = document.getElementById('conversationMessages');
+  if (!container || container.dataset.scrollBound) return;
+  container.dataset.scrollBound = 'true';
+  container.addEventListener('wheel', event => {
+    if (event.deltaY < 0) conversationAutoScroll = false;
+  }, { passive: true });
+  container.addEventListener('scroll', () => {
+    const current = container.scrollTop;
+    const distanceFromBottom = container.scrollHeight - current - container.clientHeight;
+    if (current < conversationLastScrollTop - 1) {
+      conversationAutoScroll = false;
+    } else if (distanceFromBottom < 32) {
+      conversationAutoScroll = true;
+    }
+    conversationLastScrollTop = current;
+  }, { passive: true });
+}
+
+function updateConversationDOM(container, update) {
+  const previousScrollTop = container.scrollTop;
+  const shouldFollow = conversationAutoScroll;
+  update();
+  container.scrollTop = shouldFollow ? container.scrollHeight : previousScrollTop;
+  conversationLastScrollTop = container.scrollTop;
+}
+
+function stopConversationPolling() {
+  if (conversationTimer) {
+    clearTimeout(conversationTimer);
+    conversationTimer = null;
+  }
+}
+
+async function pollConversation(sessionId, immediate = false) {
+  stopConversationPolling();
+  if (currentSessionId !== sessionId || sessionMode !== 'conversation') return;
+  try {
+    const [messagesResponse, eventsResponse] = await Promise.all([
+      api(`/api/sessions/${sessionId}/conversation/messages`),
+      api(`/api/sessions/${sessionId}/conversation/events?after=${conversationSeq}`)
+    ]);
+    if (messagesResponse.ok) {
+      const data = await messagesResponse.json();
+      renderConversationMessages(data.messages || []);
+      setConversationState(Boolean(data.running), Boolean(data.session_running));
+    }
+    if (eventsResponse.ok) {
+      const data = await eventsResponse.json();
+      for (const event of data.events || []) {
+        conversationSeq = Math.max(conversationSeq, event.seq || 0);
+        rememberConversationEventContext(event);
+        if (event.type.startsWith('tool.') || event.type === 'file.change' || event.type === 'turn.failed') {
+          mergeConversationEvent(conversationEvents, event);
+        }
+      }
+      renderConversationEvents();
+      setConversationState(Boolean(data.running), Boolean(data.session_running));
+    }
+  } catch {}
+  if (currentSessionId === sessionId && sessionMode === 'conversation') {
+    conversationTimer = setTimeout(() => pollConversation(sessionId), immediate ? 100 : 700);
+  }
+}
+
+function rememberConversationEventContext(event) {
+  if (!event.turn_id) return;
+  const messageId = event.payload?.assistant_message_id ||
+    (event.type === 'assistant.message' ? event.payload?.message_id : '');
+  if (!messageId || conversationTurnMessages.get(event.turn_id) === messageId) return;
+  conversationTurnMessages.set(event.turn_id, messageId);
+  conversationEventKey = '';
+}
+
+function mergeConversationEvent(events, event) {
+  const lifecycleEvent = event.type.startsWith('tool.') || event.type === 'file.change';
+  const key = lifecycleEvent && event.item_id
+    ? `${event.turn_id || ''}:${event.item_id}`
+    : event.type === 'turn.failed' && event.turn_id
+      ? `${event.turn_id}:turn.failed`
+      : '';
+  if (!key) {
+    events.push(event);
+    return;
+  }
+  const index = events.findIndex(existing => existing._displayKey === key);
+  event._displayKey = key;
+  if (index === -1) {
+    events.push(event);
+  } else {
+    events[index] = event;
+  }
+}
+
+function conversationEventBody(payload) {
+  if (payload.output) return payload.output;
+  if (Array.isArray(payload.changes) && payload.changes.length) {
+    return JSON.stringify(payload.changes, null, 2);
+  }
+  if (payload.changes && typeof payload.changes === 'object' && Object.keys(payload.changes).length) {
+    return JSON.stringify(payload.changes, null, 2);
+  }
+  return payload.status || (payload.phase === 'started' ? '执行中…' : '无输出');
+}
+
+function renderConversationMessages(messages) {
+  const key = messages.map(message => `${message.id}:${message.content}`).join('|');
+  if (key === conversationMessageKey) return;
+  conversationMessageKey = key;
+  conversationEventKey = '';
+  const container = document.getElementById('conversationMessages');
+  updateConversationDOM(container, () => {
+    container.querySelectorAll('.conversation-message,.conversation-empty').forEach(node => node.remove());
+    if (!messages.length) {
+      const empty = document.createElement('div');
+      empty.className = 'conversation-empty';
+      empty.textContent = 'Codex 对话模式\n停止会话后可切换到原生终端';
+      container.prepend(empty);
+    } else {
+      for (const message of messages) {
+        const element = document.createElement('div');
+        element.className = `conversation-message ${message.role === 'user' ? 'user' : 'assistant'}`;
+        element.dataset.messageId = message.id;
+        element.textContent = message.content || '';
+        container.insertBefore(element, container.querySelector('.conversation-tool,.conversation-error'));
+      }
+    }
+  });
+  renderConversationEvents();
+}
+
+function renderConversationEvents() {
+  const visibleEvents = conversationEvents.slice(-50);
+  const key = visibleEvents.map(event => `${event.seq || 0}:${event.type}:${JSON.stringify(event.payload || {})}`).join('|');
+  if (key === conversationEventKey) return;
+  conversationEventKey = key;
+  const container = document.getElementById('conversationMessages');
+  updateConversationDOM(container, () => {
+    container.querySelectorAll('.conversation-tool,.conversation-error').forEach(node => node.remove());
+    const messageElements = new Map();
+    container.querySelectorAll('.conversation-message[data-message-id]').forEach(node => {
+      messageElements.set(node.dataset.messageId, node);
+    });
+    for (const event of visibleEvents) {
+      const payload = event.payload || {};
+      const messageId = payload.assistant_message_id || conversationTurnMessages.get(event.turn_id);
+      const anchor = messageElements.get(messageId);
+      // Historical events without a reliable turn/message association used to
+      // accumulate below the newest reply. Hide them instead of misplacing them.
+      if (!anchor) continue;
+      if (event.type === 'turn.failed') {
+        const error = document.createElement('div');
+        error.className = 'conversation-error';
+        error.textContent = payload.message || 'Codex 执行失败';
+        container.insertBefore(error, anchor);
+        continue;
+      }
+      const detail = document.createElement('details');
+      detail.className = 'conversation-tool';
+      const summary = document.createElement('summary');
+      summary.textContent = payload.command || payload.kind || '文件变更';
+      const output = document.createElement('pre');
+      output.textContent = conversationEventBody(payload);
+      detail.append(summary, output);
+      container.insertBefore(detail, anchor);
+    }
+  });
+}
+
+function setConversationBusy(busy) {
+	const session = sessions.find(item => item.id === currentSessionId);
+	setConversationState(busy, Boolean(session?.conversation_running));
+}
+
+function setConversationState(busy, sessionRunning) {
+  document.getElementById('conversationSend').classList.toggle('hidden', busy);
+  document.getElementById('conversationStop').classList.toggle('hidden', !busy);
+  const session = sessions.find(item => item.id === currentSessionId);
+  if (session) {
+    session.turn_running = busy;
+    session.conversation_running = sessionRunning;
+    session.isRunning = Boolean(session.terminal_running || sessionRunning);
+    if (!session.isRunning) session.running_mode = '';
+    document.getElementById('conversationInput').disabled = busy || !session.conversation_running;
+    document.getElementById('conversationSend').disabled = !session.conversation_running;
+    updateSessionControls(session);
+    if (currentTab === 'sessions') renderSessions();
+  }
+}
+
+async function sendConversationMessage() {
+  if (!currentSessionId) return;
+  const input = document.getElementById('conversationInput');
+  const content = input.value.trim();
+  if (!content) return;
+  const response = await api(`/api/sessions/${currentSessionId}/conversation/messages`, {
+    method: 'POST', body: JSON.stringify({ content })
+  });
+  if (!response.ok) {
+    let error = {};
+    try { error = await response.json(); } catch {}
+    return alert(error.error || '发送失败');
+  }
+  input.value = '';
+  setConversationBusy(true);
+  pollConversation(currentSessionId, true);
+}
+
+async function stopConversation() {
+  if (!currentSessionId) return;
+  await api(`/api/sessions/${currentSessionId}/conversation/stop`, { method: 'POST' });
+  pollConversation(currentSessionId, true);
 }
 
 function agentProfiles(agent) {
@@ -431,10 +756,21 @@ async function startSession() {
     return alert(error.error || '启动失败');
   }
   const s = sessions.find(x => x.id === currentSessionId);
-  if (s) { s.isRunning = true; updateSessionControls(s); }
-  initTerminal();
-  if (usePolling) startPolling(currentSessionId);
-  else connectWS(currentSessionId);
+  if (s) {
+    s.isRunning = true;
+    s.running_mode = s.run_mode;
+    s.terminal_running = s.run_mode === 'terminal';
+    s.conversation_running = s.run_mode === 'conversation';
+    updateSessionControls(s);
+  }
+  if (sessionMode === 'terminal') {
+    initTerminal();
+    if (usePolling) startPolling(currentSessionId); else connectWS(currentSessionId);
+  } else {
+    document.getElementById('conversationInput').disabled = false;
+    document.getElementById('conversationSend').disabled = false;
+    pollConversation(currentSessionId, true);
+  }
   renderSessions();
 }
 
@@ -443,20 +779,67 @@ async function stopSession() {
   await api(`/api/sessions/${currentSessionId}/stop`, { method: 'POST' });
   disconnectAll();
   const s = sessions.find(x => x.id === currentSessionId);
-  if (s) { s.isRunning = false; updateSessionControls(s); }
+  if (s) { s.isRunning = false; s.terminal_running = false; s.conversation_running = false; s.turn_running = false; s.running_mode = ''; updateSessionControls(s); }
   renderSessions();
 }
 
-async function deleteSession() {
-  if (!currentSessionId) return;
-  if (!confirm('确定删除此会话？')) return;
-  disconnectAll();
-  await api(`/api/sessions/${currentSessionId}`, { method: 'DELETE' });
-  currentSessionId = null;
-  if (term) { term.dispose(); term = null; }
-  document.getElementById('emptyState').classList.remove('hidden');
-  document.getElementById('sessionView').classList.add('hidden');
-  loadSessions();
+function editSession(id) {
+  const session = sessions.find(item => item.id === id);
+  if (!session) return;
+  if (session.isRunning) return alert('请先停止会话再编辑');
+  showModal(`
+    <h3>编辑会话: ${esc(session.name)}</h3>
+    <div class="form-group">
+      <label>会话名称</label>
+      <input id="mEditSessionName" value="${escAttr(session.name)}">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" id="mSaveSession" style="width:auto">保存</button>
+    </div>
+  `);
+  document.getElementById('mSaveSession').addEventListener('click', () => updateSession(id));
+}
+
+async function updateSession(id) {
+  const name = document.getElementById('mEditSessionName').value.trim();
+  if (!name) return alert('请输入会话名称');
+  const response = await api(`/api/sessions/${id}`, {
+    method: 'PATCH', body: JSON.stringify({ name })
+  });
+  if (!response.ok) {
+    let error = {}; try { error = await response.json(); } catch {}
+    return alert(error.error || '保存失败');
+  }
+  const updated = await response.json();
+  const session = sessions.find(item => item.id === id);
+  if (session) Object.assign(session, updated);
+  if (id === currentSessionId && session) updateSessionTitle(session);
+  closeModal();
+  renderSessions();
+}
+
+async function deleteSessionById(id) {
+  const session = sessions.find(item => item.id === id);
+  if (!session || !confirm(`确定删除会话“${session.name}”？`)) return;
+  const deletingCurrent = id === currentSessionId;
+  if (deletingCurrent) {
+    disconnectAll();
+    stopConversationPolling();
+  }
+  const response = await api(`/api/sessions/${id}`, { method: 'DELETE' });
+  if (!response.ok) {
+    let error = {}; try { error = await response.json(); } catch {}
+    return alert(error.error || '删除失败');
+  }
+  if (deletingCurrent) {
+    currentSessionId = null;
+    updateSessionURL(null);
+    if (term) { term.dispose(); term = null; }
+    document.getElementById('emptyState').classList.remove('hidden');
+    document.getElementById('sessionView').classList.add('hidden');
+  }
+  await loadSessions();
 }
 
 function showNewSessionModal() {
@@ -478,13 +861,21 @@ function showNewSessionModal() {
       <label>配置文件</label>
       <select id="mProfile"></select>
     </div>
+    <div class="form-group hidden" id="mModeGroup">
+      <label>启动模式</label>
+      <select id="mRunMode">
+        <option value="terminal">原生终端</option>
+        <option value="conversation">对话模式</option>
+      </select>
+      <small>运行中不能切换；需要停止后重新选择并启动。</small>
+    </div>
     <div class="form-group">
       <label>工作目录</label>
       <input id="mWorkDir" placeholder="/home/user/code" value="${escAttr(defaultDir)}">
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">取消</button>
-      <button class="btn btn-primary" onclick="createSession()" style="width:auto">创建并启动</button>
+      <button class="btn btn-primary" id="mCreateSession" onclick="createSession()" style="width:auto">创建</button>
     </div>
   `);
   document.getElementById('mAgent').value = appConfig.defaultAgent || 'claude';
@@ -495,6 +886,9 @@ function updateNewSessionAgent() {
   const agent = document.getElementById('mAgent')?.value || 'claude';
   const select = document.getElementById('mProfile');
   if (select) populateProfileSelect(select, agent);
+  const modeGroup = document.getElementById('mModeGroup');
+  if (modeGroup) modeGroup.classList.toggle('hidden', agent !== 'codex' || !appConfig.experimental?.conversationMode);
+  if (agent !== 'codex' && document.getElementById('mRunMode')) document.getElementById('mRunMode').value = 'terminal';
 }
 
 async function createSession() {
@@ -503,37 +897,21 @@ async function createSession() {
   const profile_id = document.getElementById('mProfile').value || null;
   const agent = document.getElementById('mAgent').value;
   const working_dir = document.getElementById('mWorkDir').value.trim() || appDefaults.workingDir || '/home/user/code';
+  const run_mode = agent === 'codex' && appConfig.experimental?.conversationMode
+    ? document.getElementById('mRunMode').value : 'terminal';
 
   const r = await api('/api/sessions', {
     method: 'POST',
-    body: JSON.stringify({ name, agent, profile_id, working_dir })
+    body: JSON.stringify({ name, agent, profile_id, working_dir, run_mode })
   });
 
   if (r.ok) {
     closeModal();
-    await loadSessions();
     const data = await r.json();
     currentSessionId = data.id;
-    // Auto-start (skip_permissions from DB)
-    const startResponse = await api(`/api/sessions/${data.id}/start`, { method: 'POST' });
-    if (!startResponse.ok) {
-      const error = await startResponse.json();
-      alert(error.error || '会话已创建，但启动失败');
-    }
     await loadSessions();
     const s = sessions.find(x => x.id === data.id);
-    if (s) {
-      document.getElementById('emptyState').classList.add('hidden');
-      document.getElementById('sessionView').classList.remove('hidden');
-      document.getElementById('sessionView').style.display = 'flex';
-      updateSessionTitle(s);
-      updateSessionControls(s);
-      initTerminal();
-      if (startResponse.ok) {
-        if (usePolling) startPolling(data.id);
-        else connectWS(data.id);
-      }
-    }
+    if (s) await selectSession(data.id);
   } else {
     const err = await r.json();
     alert(err.error || '创建失败');
@@ -794,7 +1172,7 @@ function handleExit(exitCode) {
     term.write(`\r\n\x1b[33m[进程退出, code=${exitCode || 0}]\x1b[0m\r\n`);
   }
   const s = sessions.find(x => x.id === currentSessionId);
-  if (s) { s.isRunning = false; updateSessionControls(s); }
+  if (s) { s.terminal_running = false; s.isRunning = Boolean(s.conversation_running); updateSessionControls(s); }
   loadSessions();
 }
 

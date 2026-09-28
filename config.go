@@ -17,16 +17,17 @@ const (
 )
 
 type Config struct {
-	Server      ServerConfig      `json:"server"`
-	Auth        AuthConfig        `json:"auth"`
-	Database    DatabaseConfig    `json:"database"`
-	Claude      AgentConfig       `json:"claude"`
-	Codex       AgentConfig       `json:"codex"`
-	Session     SessionConfig     `json:"session"`
-	Defaults    DefaultsConfig    `json:"defaults"`
-	Branding    BrandingConfig    `json:"branding"`
-	FileBrowser FileBrowserConfig `json:"fileBrowser"`
-	Logging     LoggingConfig     `json:"logging"`
+	Server       ServerConfig       `json:"server"`
+	Auth         AuthConfig         `json:"auth"`
+	Database     DatabaseConfig     `json:"database"`
+	Claude       AgentConfig        `json:"claude"`
+	Codex        AgentConfig        `json:"codex"`
+	Session      SessionConfig      `json:"session"`
+	Defaults     DefaultsConfig     `json:"defaults"`
+	Branding     BrandingConfig     `json:"branding"`
+	FileBrowser  FileBrowserConfig  `json:"fileBrowser"`
+	Logging      LoggingConfig      `json:"logging"`
+	Experimental ExperimentalConfig `json:"experimental"`
 
 	BaseDir           string `json:"-"`
 	ConfigPath        string `json:"-"`
@@ -92,6 +93,10 @@ type FileBrowserConfig struct {
 type LoggingConfig struct {
 	Path      string `json:"path"`
 	MaxSizeMB int64  `json:"maxSizeMB"`
+}
+
+type ExperimentalConfig struct {
+	ConversationMode bool `json:"conversationMode"`
 }
 
 func loadConfig(configPath string) (*Config, error) {

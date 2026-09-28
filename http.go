@@ -33,13 +33,19 @@ func (a *App) routes() http.Handler {
 	mux.Handle("DELETE /api/profiles/{id}", a.requireAuth(http.HandlerFunc(a.handleDeleteProfile)))
 	mux.Handle("GET /api/sessions", a.requireAuth(http.HandlerFunc(a.handleListSessions)))
 	mux.Handle("POST /api/sessions", a.requireAuth(http.HandlerFunc(a.handleCreateSession)))
+	mux.Handle("PATCH /api/sessions/{id}", a.requireAuth(http.HandlerFunc(a.handleUpdateSession)))
 	mux.Handle("DELETE /api/sessions/{id}", a.requireAuth(http.HandlerFunc(a.handleDeleteSession)))
 	mux.Handle("POST /api/sessions/{id}/start", a.requireAuth(http.HandlerFunc(a.handleStartSession)))
 	mux.Handle("POST /api/sessions/{id}/stop", a.requireAuth(http.HandlerFunc(a.handleStopSession)))
 	mux.Handle("PATCH /api/sessions/{id}/skip-permissions", a.requireAuth(http.HandlerFunc(a.handleSkipPermissions)))
 	mux.Handle("PATCH /api/sessions/{id}/profile", a.requireAuth(http.HandlerFunc(a.handleSessionProfile)))
+	mux.Handle("PATCH /api/sessions/{id}/mode", a.requireAuth(http.HandlerFunc(a.handleSessionMode)))
 	mux.Handle("GET /api/sessions/{id}/messages", a.requireAuth(http.HandlerFunc(a.handleListMessages)))
 	mux.Handle("POST /api/sessions/{id}/messages", a.requireAuth(http.HandlerFunc(a.handleCreateMessage)))
+	mux.Handle("GET /api/sessions/{id}/conversation/messages", a.requireAuth(http.HandlerFunc(a.handleListConversationMessages)))
+	mux.Handle("POST /api/sessions/{id}/conversation/messages", a.requireAuth(http.HandlerFunc(a.handleCreateConversationMessage)))
+	mux.Handle("GET /api/sessions/{id}/conversation/events", a.requireAuth(http.HandlerFunc(a.handleListConversationEvents)))
+	mux.Handle("POST /api/sessions/{id}/conversation/stop", a.requireAuth(http.HandlerFunc(a.handleStopConversation)))
 	mux.Handle("GET /api/sessions/{id}/output", a.requireAuth(http.HandlerFunc(a.handlePollOutput)))
 	mux.Handle("POST /api/sessions/{id}/input", a.requireAuth(http.HandlerFunc(a.handleTerminalInput)))
 	mux.Handle("POST /api/sessions/{id}/resize", a.requireAuth(http.HandlerFunc(a.handleTerminalResize)))
@@ -117,6 +123,7 @@ func (a *App) handleAppConfig(w http.ResponseWriter, _ *http.Request) {
 		"branding": a.cfg.Branding, "pollIntervalMs": a.cfg.Session.PollIntervalMS,
 		"defaultWorkingDir": a.cfg.DefaultWorkingDir, "defaultAgent": a.cfg.Session.DefaultAgent,
 		"agents": map[string]string{"claude": "Claude Code", "codex": "Codex"}, "fileBrowserUrl": a.cfg.FileBrowser.URL,
+		"experimental": map[string]bool{"conversationMode": a.cfg.Experimental.ConversationMode},
 	})
 }
 
