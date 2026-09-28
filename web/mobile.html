@@ -168,6 +168,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',Roboto,san
         <select id="profSel" class="prof-sel hidden"><option value="">默认</option></select>
         <button class="tbtn" id="wsBtn">WS</button>
         <button class="tbtn" id="spBtn">Skip</button>
+        <button class="tbtn hidden" id="autoBtn">续行</button>
         <button class="tbtn" id="fbBtn">文件</button>
       </div>
     </div>
@@ -219,6 +220,7 @@ $('btnBack').addEventListener('click',goSessions);
 $('btnStart').addEventListener('click',doStart);
 $('btnStop').addEventListener('click',doStop);
 $('spBtn').addEventListener('click',toggleSP);
+$('autoBtn').addEventListener('click',showAutoContinueSheet);
 $('profSel').addEventListener('change',changeProfile);
 $('fbBtn').addEventListener('click',openFB);
 $('wsBtn').addEventListener('click',toggleWS);
@@ -327,6 +329,7 @@ async function refresh(){
     const profileSelect=$('profSel');
     populateProfSelect(profileSelect,current.agent);
     profileSelect.value=current.profile_id||'';
+    updateCtrl(current);
   }
   renderS();renderP();
   if(!sid){
@@ -341,7 +344,7 @@ function updateSessionURL(id,mode=''){const url=new URL(window.location.href);if
 function renderS(){
   const el=$('sessionList');
   if(!sessions.length){el.innerHTML='<div style="padding:40px;text-align:center;color:var(--muted)">暂无会话</div>';return;}
-  el.innerHTML=sessions.map(s=>`<div class="sitem ${s.id===sid?'on':''}" data-sid="${escAttr(s.id)}" role="button" tabindex="0" aria-label="打开会话 ${escAttr(s.name)}"><div class="sitem-main"><div class="sitem-info"><div class="sitem-name">${s.agent==='codex'?'🟢 Codex':'🟣 Claude'} · ${esc(s.name)}</div><div class="sitem-meta">${esc(s.profile_name||(s.agent==='codex'?'Codex 默认配置':'Claude 默认配置'))} · ${esc(s.working_dir||'')}</div></div><span class="sitem-dot ${s.isRunning?'run':'stop'}"></span></div><div class="sitem-actions"><button class="tbtn js-edits" data-sid="${escAttr(s.id)}" ${s.isRunning?'disabled title="请先停止会话"':''}>编辑</button><button class="tbtn danger js-dels" data-sid="${escAttr(s.id)}">删除</button></div></div>`).join('');
+  el.innerHTML=sessions.map(s=>`<div class="sitem ${s.id===sid?'on':''}" data-sid="${escAttr(s.id)}" role="button" tabindex="0" aria-label="打开会话 ${escAttr(s.name)}"><div class="sitem-main"><div class="sitem-info"><div class="sitem-name">${s.agent==='codex'?'🟢 Codex':'🟣 Claude'} · ${esc(s.name)}</div><div class="sitem-meta">${esc(s.profile_name||(s.agent==='codex'?'Codex 默认配置':'Claude 默认配置'))} · ${esc(s.working_dir||'')}${s.auto_continue_enabled?` · 续行 ${s.auto_continue_remaining}`:''}</div></div><span class="sitem-dot ${s.isRunning?'run':'stop'}"></span></div><div class="sitem-actions"><button class="tbtn js-edits" data-sid="${escAttr(s.id)}" ${s.isRunning?'disabled title="请先停止会话"':''}>编辑</button><button class="tbtn danger js-dels" data-sid="${escAttr(s.id)}">删除</button></div></div>`).join('');
   el.querySelectorAll('.sitem').forEach(item=>{
     item.addEventListener('click',e=>{if(!e.target.closest('.js-edits,.js-dels')){const s=sessions.find(x=>x.id===item.dataset.sid);if(s)goTerm(s);}});
     item.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&!e.target.closest('.js-edits,.js-dels')){e.preventDefault();const s=sessions.find(x=>x.id===item.dataset.sid);if(s)goTerm(s);}});
@@ -370,7 +373,27 @@ function updateCtrl(s){
   $('spBtn').title=s.agent==='codex'?'Codex 完全访问模式':'跳过 Claude Code 权限确认';
   const ps=$('profSel');
   if(ps){populateProfSelect(ps,s.agent);ps.classList.toggle('hidden',r);ps.value=s.profile_id||'';updateTermTitle(s);}
+  $('autoBtn').classList.toggle('hidden',s.agent!=='codex');
+  $('autoBtn').classList.toggle('on',!!s.auto_continue_enabled);
+  $('autoBtn').textContent=s.auto_continue_enabled?'续行 '+s.auto_continue_remaining:'续行';
   updateConvHint(s);
+}
+
+function showAutoContinueSheet(){
+  const s=sessions.find(x=>x.id===sid);if(!s||s.agent!=='codex')return;
+  const defaults=appCfg.autoContinueDefaults||{},count=s.auto_continue_enabled?s.auto_continue_total:(s.auto_continue_total||defaults.triggerCount||3),minutes=s.auto_continue_interval_minutes||defaults.intervalMinutes||20;
+  sheet(`<h3>Codex 自动续行</h3><p style="color:var(--text2);font-size:13px;line-height:1.6">服务端按周期检测 Codex 是否已经空闲，空闲时自动发送“继续”。会话停止时暂停。</p><label>触发次数</label><input id="acCount" type="number" min="1" max="1000" value="${count}"><label>检查周期（分钟）</label><input id="acMinutes" type="number" min="1" max="1440" value="${minutes}">${s.auto_continue_enabled?`<small style="display:block;margin-top:12px;color:var(--success)">当前剩余 ${s.auto_continue_remaining}/${s.auto_continue_total} 次</small>`:''}<div class="sheet-btns">${s.auto_continue_enabled?'<button class="btn-cancel" id="acDisable">关闭</button>':'<button class="btn-cancel" id="shCancel">取消</button>'}<button class="btn-ok" id="acEnable">${s.auto_continue_enabled?'重新开启':'开启'}</button></div>`);
+  const cancel=$('shCancel');if(cancel)cancel.addEventListener('click',closeSheet);
+  const disable=$('acDisable');if(disable)disable.addEventListener('click',()=>saveAutoContinue(false));
+  $('acEnable').addEventListener('click',()=>saveAutoContinue(true));
+}
+
+async function saveAutoContinue(enabled){
+  if(!sid)return;
+  const defaults=appCfg.autoContinueDefaults||{},count=Number($('acCount')?.value||defaults.triggerCount||3),minutes=Number($('acMinutes')?.value||defaults.intervalMinutes||20);
+  const r=await api('/api/sessions/'+sid+'/auto-continue',{method:'PUT',body:JSON.stringify({enabled,trigger_count:count,interval_minutes:minutes})});
+  if(!r.ok){let e={};try{e=await r.json();}catch{}return alert(e.error||'自动续行设置失败');}
+  const updated=await r.json(),s=sessions.find(x=>x.id===sid);if(s){Object.assign(s,updated);updateCtrl(s);renderS();}closeSheet();
 }
 function updateConvHint(s){
   if(!s)return;const warnings=[];

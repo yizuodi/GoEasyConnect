@@ -63,6 +63,7 @@
               <input type="checkbox" id="skipPermCheck" onchange="toggleSkipPerm()">
               <span>🔓 Skip Perms</span>
             </label>
+            <button class="btn btn-sm btn-ghost hidden" id="autoContinueBtn" onclick="showAutoContinueModal()" title="配置 Codex 自动续行">⏱ 续行</button>
             <button class="btn btn-sm btn-ghost" id="pollToggle" onclick="togglePolling()" title="切换连接模式">🔌 WebSocket</button>
             <button class="btn btn-sm btn-ghost" id="btnFiles" onclick="openFileBrowser()" title="在文件管理器中打开工作目录">📁 文件</button>
             <span id="sessionStatus" style="font-size:12px;color:var(--text-secondary)"></span>

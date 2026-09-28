@@ -22,6 +22,11 @@ type Session struct {
 	CodexSessionID      string  `json:"codex_session_id"`
 	RunMode             string  `json:"run_mode"`
 	SkipPermissions     int     `json:"skip_permissions"`
+	AutoContinueEnabled bool    `json:"auto_continue_enabled"`
+	AutoContinueTotal   int     `json:"auto_continue_total"`
+	AutoContinueRemain  int     `json:"auto_continue_remaining"`
+	AutoContinueMinutes int     `json:"auto_continue_interval_minutes"`
+	AutoContinueNextAt  string  `json:"auto_continue_next_at,omitempty"`
 	CreatedAt           string  `json:"created_at"`
 	UpdatedAt           string  `json:"updated_at"`
 	ProfileName         *string `json:"profile_name"`

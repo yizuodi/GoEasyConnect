@@ -40,6 +40,7 @@ func (a *App) routes() http.Handler {
 	mux.Handle("PATCH /api/sessions/{id}/skip-permissions", a.requireAuth(http.HandlerFunc(a.handleSkipPermissions)))
 	mux.Handle("PATCH /api/sessions/{id}/profile", a.requireAuth(http.HandlerFunc(a.handleSessionProfile)))
 	mux.Handle("PATCH /api/sessions/{id}/mode", a.requireAuth(http.HandlerFunc(a.handleSessionMode)))
+	mux.Handle("PUT /api/sessions/{id}/auto-continue", a.requireAuth(http.HandlerFunc(a.handleAutoContinue)))
 	mux.Handle("GET /api/sessions/{id}/messages", a.requireAuth(http.HandlerFunc(a.handleListMessages)))
 	mux.Handle("POST /api/sessions/{id}/messages", a.requireAuth(http.HandlerFunc(a.handleCreateMessage)))
 	mux.Handle("GET /api/sessions/{id}/conversation/messages", a.requireAuth(http.HandlerFunc(a.handleListConversationMessages)))
@@ -123,7 +124,8 @@ func (a *App) handleAppConfig(w http.ResponseWriter, _ *http.Request) {
 		"branding": a.cfg.Branding, "pollIntervalMs": a.cfg.Session.PollIntervalMS,
 		"defaultWorkingDir": a.cfg.DefaultWorkingDir, "defaultAgent": a.cfg.Session.DefaultAgent,
 		"agents": map[string]string{"claude": "Claude Code", "codex": "Codex"}, "fileBrowserUrl": a.cfg.FileBrowser.URL,
-		"experimental": map[string]bool{"conversationMode": a.cfg.Experimental.ConversationMode},
+		"experimental":         map[string]bool{"conversationMode": a.cfg.Experimental.ConversationMode},
+		"autoContinueDefaults": map[string]int{"triggerCount": defaultAutoContinueCount, "intervalMinutes": defaultAutoContinueMinutes},
 	})
 }
 

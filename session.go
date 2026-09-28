@@ -411,6 +411,9 @@ func (t *TerminalSession) finalize(exitCode int) {
 		if err := t.manager.app.store.setSessionStatus(t.dbID, "stopped"); err != nil {
 			t.manager.app.logError("mark session stopped", err)
 		}
+		if t.manager.app.autoContinue != nil {
+			t.manager.app.autoContinue.SessionStopped(t.dbID)
+		}
 		t.manager.finish(t.dbID, t)
 		payload, _ := json.Marshal(map[string]any{"type": "exit", "exitCode": exitCode})
 		for _, client := range clients {
@@ -436,6 +439,9 @@ func (t *TerminalSession) stop() {
 			}
 			if err := t.manager.app.store.setSessionStatus(t.dbID, "stopped"); err != nil {
 				t.manager.app.logError("mark stopped session", err)
+			}
+			if t.manager.app.autoContinue != nil {
+				t.manager.app.autoContinue.SessionStopped(t.dbID)
 			}
 			t.manager.finish(t.dbID, t)
 		}()

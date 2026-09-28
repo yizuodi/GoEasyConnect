@@ -200,6 +200,7 @@ func (a *App) handleStartSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to start %s: %s", agentLabel(session.Agent), startErr.Error())})
 		return
 	}
+	a.autoContinue.SessionStarted(session.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "running", "running_mode": session.RunMode})
 }
 
@@ -215,7 +216,52 @@ func (a *App) handleStopSession(w http.ResponseWriter, r *http.Request) {
 	}
 	a.sessions.Stop(session.ID)
 	a.conversations.StopSession(session.ID)
+	a.autoContinue.SessionStopped(session.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "stopped"})
+}
+
+func (a *App) handleAutoContinue(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	session, err := a.store.getSession(id)
+	if isNotFound(err) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Session not found"})
+		return
+	}
+	if err != nil {
+		a.writeInternalError(w, "get auto-continue session", err)
+		return
+	}
+	if session.Agent != "codex" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Auto-continue supports Codex sessions only"})
+		return
+	}
+	var request struct {
+		Enabled         bool `json:"enabled"`
+		TriggerCount    int  `json:"trigger_count"`
+		IntervalMinutes int  `json:"interval_minutes"`
+	}
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	if !request.Enabled {
+		updated, err := a.autoContinue.Configure(session, false, 0, 0)
+		if err != nil {
+			a.writeInternalError(w, "disable auto-continue", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, updated)
+		return
+	}
+	if err := validateAutoContinue(request.TriggerCount, request.IntervalMinutes); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	updated, err := a.autoContinue.Configure(session, true, request.TriggerCount, request.IntervalMinutes)
+	if err != nil {
+		a.writeInternalError(w, "enable auto-continue", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
 }
 
 func (a *App) handleSessionMode(w http.ResponseWriter, r *http.Request) {

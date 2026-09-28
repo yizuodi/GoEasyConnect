@@ -393,6 +393,9 @@ func (s *AppServerSession) run(stdout, stderr io.Reader) {
 	if err := s.manager.app.store.setSessionStatus(s.sessionID, "stopped"); err != nil {
 		s.manager.app.logError("mark conversation session stopped", err)
 	}
+	if s.manager.app.autoContinue != nil {
+		s.manager.app.autoContinue.SessionStopped(s.sessionID)
+	}
 	s.manager.finish(s)
 	close(s.done)
 }

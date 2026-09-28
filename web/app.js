@@ -314,6 +314,10 @@ async function loadSessions() {
   const r = await api('/api/sessions');
   if (r.ok) sessions = await r.json();
   if (currentTab === 'sessions') renderSessions();
+  if (currentSessionId) {
+    const current = sessions.find(session => session.id === currentSessionId);
+    if (current) updateSessionControls(current);
+  }
   if (!currentSessionId) {
     const requestedID = new URL(window.location.href).searchParams.get('session');
     if (requestedID && sessions.some(session => session.id === requestedID)) {
@@ -347,7 +351,7 @@ function renderSessions() {
   el.innerHTML = sessions.map(s => `
     <div class="session-item ${s.id === currentSessionId ? 'active' : ''}" data-session-id="${escAttr(s.id)}" role="button" tabindex="0" aria-label="打开会话 ${escAttr(s.name)}">
       <div class="session-main">
-        <span class="session-name"><span class="agent-badge ${s.agent === 'codex' ? 'codex' : 'claude'}">${s.agent === 'codex' ? 'Codex' : 'Claude'}</span><span class="session-label">${esc(s.name)}</span></span>
+        <span class="session-name"><span class="agent-badge ${s.agent === 'codex' ? 'codex' : 'claude'}">${s.agent === 'codex' ? 'Codex' : 'Claude'}</span><span class="session-label">${esc(s.name)}${s.auto_continue_enabled ? ` · 续行 ${s.auto_continue_remaining}` : ''}</span></span>
         <span class="session-status ${s.isRunning ? 'running' : 'stopped'}" title="${s.isRunning ? '运行中' : '已停止'}"></span>
       </div>
       <div class="session-actions">
@@ -427,6 +431,70 @@ function updateSessionControls(s) {
   modeSwitch.classList.toggle('disabled', running);
   for (const button of modeSwitch.querySelectorAll('button')) button.disabled = running;
   updateConversationWarning(s);
+  const autoContinue = document.getElementById('autoContinueBtn');
+  if (autoContinue) {
+    autoContinue.classList.toggle('hidden', s.agent !== 'codex');
+    autoContinue.classList.toggle('active', Boolean(s.auto_continue_enabled));
+    autoContinue.textContent = s.auto_continue_enabled
+      ? `⏱ 续行 ${s.auto_continue_remaining}`
+      : '⏱ 续行';
+    autoContinue.title = s.auto_continue_enabled
+      ? `已开启：剩余 ${s.auto_continue_remaining}/${s.auto_continue_total} 次，每 ${s.auto_continue_interval_minutes} 分钟检查`
+      : '配置 Codex 自动续行';
+  }
+}
+
+function showAutoContinueModal() {
+  const session = sessions.find(item => item.id === currentSessionId);
+  if (!session || session.agent !== 'codex') return;
+  const defaults = appConfig.autoContinueDefaults || {};
+  const count = session.auto_continue_enabled
+    ? session.auto_continue_total
+    : (session.auto_continue_total || defaults.triggerCount || 3);
+  const minutes = session.auto_continue_interval_minutes || defaults.intervalMinutes || 20;
+  showModal(`
+    <h3>Codex 自动续行</h3>
+    <p style="color:var(--text-secondary);font-size:13px;line-height:1.6;margin-bottom:12px;">服务端按周期检测 Codex 是否已结束当前执行；空闲时自动发送“继续”。会话停止时暂停，重新启动后恢复计时。</p>
+    <div class="form-group">
+      <label>触发次数</label>
+      <input id="mAutoContinueCount" type="number" min="1" max="1000" value="${count}">
+    </div>
+    <div class="form-group">
+      <label>检查周期（分钟）</label>
+      <input id="mAutoContinueMinutes" type="number" min="1" max="1440" value="${minutes}">
+    </div>
+    ${session.auto_continue_enabled ? `<p style="color:var(--success);font-size:13px;">当前剩余 ${session.auto_continue_remaining}/${session.auto_continue_total} 次</p>` : ''}
+    <div class="modal-actions">
+      ${session.auto_continue_enabled ? '<button class="btn btn-danger" id="mDisableAutoContinue">关闭</button>' : ''}
+      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" id="mEnableAutoContinue" style="width:auto">${session.auto_continue_enabled ? '重新开启' : '开启'}</button>
+    </div>
+  `);
+  document.getElementById('mEnableAutoContinue').addEventListener('click', () => saveAutoContinue(true));
+  const disable = document.getElementById('mDisableAutoContinue');
+  if (disable) disable.addEventListener('click', () => saveAutoContinue(false));
+}
+
+async function saveAutoContinue(enabled) {
+  if (!currentSessionId) return;
+  const defaults = appConfig.autoContinueDefaults || {};
+  const count = Number(document.getElementById('mAutoContinueCount')?.value || defaults.triggerCount || 3);
+  const minutes = Number(document.getElementById('mAutoContinueMinutes')?.value || defaults.intervalMinutes || 20);
+  const response = await api(`/api/sessions/${currentSessionId}/auto-continue`, {
+    method: 'PUT', body: JSON.stringify({ enabled, trigger_count: count, interval_minutes: minutes })
+  });
+  if (!response.ok) {
+    let error = {}; try { error = await response.json(); } catch {}
+    return alert(error.error || '自动续行设置失败');
+  }
+  const updated = await response.json();
+  const session = sessions.find(item => item.id === currentSessionId);
+  if (session) {
+    Object.assign(session, updated);
+    updateSessionControls(session);
+    renderSessions();
+  }
+  closeModal();
 }
 
 function updateConversationWarning(s) {

@@ -16,6 +16,7 @@ type App struct {
 	logger        *log.Logger
 	sessions      *SessionManager
 	conversations *ConversationManager
+	autoContinue  *AutoContinueManager
 	server        *http.Server
 	wsMu          sync.Mutex
 	wsClients     map[*wsClient]struct{}
@@ -41,6 +42,7 @@ func newApp(cfg *Config, logger *log.Logger) (*App, error) {
 	}
 	app.sessions = newSessionManager(app)
 	app.conversations = newConversationManager(app)
+	app.autoContinue = newAutoContinueManager(app)
 	profiles, err := store.listProfiles("")
 	if err != nil {
 		_ = store.Close()
@@ -51,6 +53,7 @@ func newApp(cfg *Config, logger *log.Logger) (*App, error) {
 			logger.Printf("sync %s profile %s: %v", profile.Agent, profile.ID, err)
 		}
 	}
+	app.autoContinue.Start()
 	return app, nil
 }
 
@@ -61,6 +64,7 @@ func (a *App) close(ctx context.Context) error {
 		}
 	}
 	a.closeWebSockets()
+	a.autoContinue.Stop()
 	a.conversations.stopAll()
 	a.sessions.stopAll()
 	return a.store.Close()

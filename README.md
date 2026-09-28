@@ -21,6 +21,7 @@ GoEasyConnect 是一个面向小型、自托管、单机环境的 Claude Code �
 - 兼容 EasyClaude/EasyConnect SQLite Schema，并自动执行增量迁移
 - SQLite WAL、`0600` 敏感文件权限和有大小上限的 `error.log`
 - 有界终端、轮询和 WebSocket 缓冲，适合资源有限的单机环境
+- Codex 自动续行：按周期检测任务是否结束，空闲时限次发送“继续”
 
 ## 系统要求
 
@@ -119,6 +120,15 @@ ID，因此停止后切换模式仍能继续已提交的对话历史，但不会
 第一版仅支持 Codex 对话，且启动前必须启用 `Skip Perms`；这等同于允许 Codex
 无需审批执行命令和修改文件，请只在受信任的单用户环境中使用。停止对话中的回复
 只会调用 `turn/interrupt`，不会关闭 app-server；顶部“停止”才会结束整个会话。
+
+### Codex 自动续行
+
+Codex 会话顶部的“续行”按钮可以开启服务端自动续行。每次开启可设置触发次数和
+检查周期，周期默认 20 分钟；达到触发次数后自动关闭，也可随时手动关闭。只有
+Codex 会话进程仍在运行且当前任务已经结束时才会发送“继续”，执行中的检查不会
+消耗次数。对话模式使用 app-server 的 turn 状态判断；原生终端模式读取 Codex
+会话 JSONL 中的 `task_started`、`task_complete` 和 `turn_aborted` 事件。状态无法
+确认时不会发送。会话停止后暂停检测，重新启动后从一个完整周期重新计时。
 
 ## systemd 部署
 

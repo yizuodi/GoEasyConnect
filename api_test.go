@@ -192,6 +192,58 @@ func TestSessionRunModeAPI(t *testing.T) {
 	app.conversations.mu.Unlock()
 }
 
+func TestAutoContinueAPI(t *testing.T) {
+	cfg := testConfig(t)
+	app := testApp(t, cfg)
+	server := httptest.NewServer(app.routes())
+	defer server.Close()
+
+	session := Session{ID: "auto-api", Name: "auto", Agent: "codex", WorkingDir: cfg.DefaultWorkingDir}
+	if err := app.store.createSession(session); err != nil {
+		t.Fatal(err)
+	}
+	response := requestJSON(t, server.URL, cfg.Auth.Password, http.MethodPut, "/api/sessions/"+session.ID+"/auto-continue", map[string]any{
+		"enabled": true, "trigger_count": 4, "interval_minutes": 20,
+	})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("enable auto-continue status=%d body=%s", response.StatusCode, readBody(t, response))
+	}
+	var updated Session
+	decodeBody(t, response, &updated)
+	if !updated.AutoContinueEnabled || updated.AutoContinueTotal != 4 || updated.AutoContinueRemain != 4 || updated.AutoContinueMinutes != 20 {
+		t.Fatalf("enabled session=%#v", updated)
+	}
+
+	response = requestJSON(t, server.URL, cfg.Auth.Password, http.MethodPut, "/api/sessions/"+session.ID+"/auto-continue", map[string]any{
+		"enabled": true, "trigger_count": 0, "interval_minutes": 20,
+	})
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid count status=%d body=%s", response.StatusCode, readBody(t, response))
+	}
+	response.Body.Close()
+
+	response = requestJSON(t, server.URL, cfg.Auth.Password, http.MethodPut, "/api/sessions/"+session.ID+"/auto-continue", map[string]any{"enabled": false})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("disable auto-continue status=%d body=%s", response.StatusCode, readBody(t, response))
+	}
+	decodeBody(t, response, &updated)
+	if updated.AutoContinueEnabled {
+		t.Fatalf("disabled session=%#v", updated)
+	}
+
+	claude := Session{ID: "auto-claude", Name: "claude", Agent: "claude", WorkingDir: cfg.DefaultWorkingDir}
+	if err := app.store.createSession(claude); err != nil {
+		t.Fatal(err)
+	}
+	response = requestJSON(t, server.URL, cfg.Auth.Password, http.MethodPut, "/api/sessions/"+claude.ID+"/auto-continue", map[string]any{
+		"enabled": true, "trigger_count": 3, "interval_minutes": 20,
+	})
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("Claude auto-continue status=%d body=%s", response.StatusCode, readBody(t, response))
+	}
+	response.Body.Close()
+}
+
 func TestUpdateSessionAPI(t *testing.T) {
 	cfg := testConfig(t)
 	app := testApp(t, cfg)

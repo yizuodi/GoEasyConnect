@@ -67,6 +67,11 @@ CREATE TABLE IF NOT EXISTS sessions (
   codex_session_id TEXT DEFAULT '',
   run_mode TEXT NOT NULL DEFAULT 'terminal',
   skip_permissions INTEGER DEFAULT 0,
+  auto_continue_enabled INTEGER NOT NULL DEFAULT 0,
+  auto_continue_total INTEGER NOT NULL DEFAULT 0,
+  auto_continue_remaining INTEGER NOT NULL DEFAULT 0,
+  auto_continue_interval_minutes INTEGER NOT NULL DEFAULT 20,
+  auto_continue_next_at TEXT NOT NULL DEFAULT '',
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (profile_id) REFERENCES settings_profiles(id) ON DELETE SET NULL
@@ -104,6 +109,11 @@ CREATE INDEX IF NOT EXISTS idx_conversation_events_session_seq ON conversation_e
 		`ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'claude'`,
 		`ALTER TABLE sessions ADD COLUMN codex_session_id TEXT DEFAULT ''`,
 		`ALTER TABLE sessions ADD COLUMN run_mode TEXT NOT NULL DEFAULT 'terminal'`,
+		`ALTER TABLE sessions ADD COLUMN auto_continue_enabled INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE sessions ADD COLUMN auto_continue_total INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE sessions ADD COLUMN auto_continue_remaining INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE sessions ADD COLUMN auto_continue_interval_minutes INTEGER NOT NULL DEFAULT 20`,
+		`ALTER TABLE sessions ADD COLUMN auto_continue_next_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE settings_profiles ADD COLUMN agent TEXT NOT NULL DEFAULT 'claude'`,
 		`ALTER TABLE messages ADD COLUMN channel TEXT NOT NULL DEFAULT 'terminal'`,
 		`ALTER TABLE messages ADD COLUMN source_id TEXT NOT NULL DEFAULT ''`,
@@ -115,7 +125,7 @@ CREATE INDEX IF NOT EXISTS idx_conversation_events_session_seq ON conversation_e
 	if _, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_conversation_source ON messages(session_id,channel,source_id) WHERE source_id<>''`); err != nil {
 		return fmt.Errorf("create conversation source index: %w", err)
 	}
-	if _, err := s.db.Exec(`UPDATE sessions SET status='stopped'`); err != nil {
+	if _, err := s.db.Exec(`UPDATE sessions SET status='stopped',auto_continue_next_at=''`); err != nil {
 		return fmt.Errorf("reset stale session status: %w", err)
 	}
 	s.secureFiles()
@@ -209,8 +219,10 @@ func (s *Store) deleteProfile(id string) error {
 	return requireAffected(result)
 }
 
+const sessionColumns = `s.id,s.name,s.profile_id,COALESCE(s.working_dir,''),COALESCE(s.status,'stopped'),COALESCE(s.agent,'claude'),s.claude_pid,COALESCE(s.claude_session_id,''),COALESCE(s.codex_session_id,''),COALESCE(s.run_mode,'terminal'),COALESCE(s.skip_permissions,0),COALESCE(s.auto_continue_enabled,0),COALESCE(s.auto_continue_total,0),COALESCE(s.auto_continue_remaining,0),COALESCE(s.auto_continue_interval_minutes,20),COALESCE(s.auto_continue_next_at,''),s.created_at,s.updated_at,p.name`
+
 func (s *Store) listSessions() ([]Session, error) {
-	rows, err := s.db.Query(`SELECT s.id,s.name,s.profile_id,COALESCE(s.working_dir,''),COALESCE(s.status,'stopped'),COALESCE(s.agent,'claude'),s.claude_pid,COALESCE(s.claude_session_id,''),COALESCE(s.codex_session_id,''),COALESCE(s.run_mode,'terminal'),COALESCE(s.skip_permissions,0),s.created_at,s.updated_at,p.name FROM sessions s LEFT JOIN settings_profiles p ON s.profile_id=p.id ORDER BY s.updated_at DESC`)
+	rows, err := s.db.Query(`SELECT ` + sessionColumns + ` FROM sessions s LEFT JOIN settings_profiles p ON s.profile_id=p.id ORDER BY s.updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -228,8 +240,8 @@ func (s *Store) listSessions() ([]Session, error) {
 
 func (s *Store) getSession(id string) (Session, error) {
 	var session Session
-	row := s.db.QueryRow(`SELECT s.id,s.name,s.profile_id,COALESCE(s.working_dir,''),COALESCE(s.status,'stopped'),COALESCE(s.agent,'claude'),s.claude_pid,COALESCE(s.claude_session_id,''),COALESCE(s.codex_session_id,''),COALESCE(s.run_mode,'terminal'),COALESCE(s.skip_permissions,0),s.created_at,s.updated_at,p.name FROM sessions s LEFT JOIN settings_profiles p ON s.profile_id=p.id WHERE s.id=?`, id)
-	err := row.Scan(&session.ID, &session.Name, &session.ProfileID, &session.WorkingDir, &session.Status, &session.Agent, &session.ClaudePID, &session.ClaudeSessionID, &session.CodexSessionID, &session.RunMode, &session.SkipPermissions, &session.CreatedAt, &session.UpdatedAt, &session.ProfileName)
+	row := s.db.QueryRow(`SELECT `+sessionColumns+` FROM sessions s LEFT JOIN settings_profiles p ON s.profile_id=p.id WHERE s.id=?`, id)
+	err := scanSession(row, &session)
 	return session, err
 }
 
@@ -238,7 +250,7 @@ type rowScanner interface {
 }
 
 func scanSession(row rowScanner, session *Session) error {
-	return row.Scan(&session.ID, &session.Name, &session.ProfileID, &session.WorkingDir, &session.Status, &session.Agent, &session.ClaudePID, &session.ClaudeSessionID, &session.CodexSessionID, &session.RunMode, &session.SkipPermissions, &session.CreatedAt, &session.UpdatedAt, &session.ProfileName)
+	return row.Scan(&session.ID, &session.Name, &session.ProfileID, &session.WorkingDir, &session.Status, &session.Agent, &session.ClaudePID, &session.ClaudeSessionID, &session.CodexSessionID, &session.RunMode, &session.SkipPermissions, &session.AutoContinueEnabled, &session.AutoContinueTotal, &session.AutoContinueRemain, &session.AutoContinueMinutes, &session.AutoContinueNextAt, &session.CreatedAt, &session.UpdatedAt, &session.ProfileName)
 }
 
 func (s *Store) createSession(session Session) error {
@@ -302,6 +314,39 @@ func (s *Store) setSkipPermissions(id string, enabled bool) error {
 
 func (s *Store) setSessionRunMode(id, mode string) error {
 	result, err := s.db.Exec(`UPDATE sessions SET run_mode=?,updated_at=datetime('now') WHERE id=?`, mode, id)
+	if err != nil {
+		return err
+	}
+	return requireAffected(result)
+}
+
+func (s *Store) setAutoContinue(id string, enabled bool, total, minutes int, nextAt string) error {
+	value := 0
+	if enabled {
+		value = 1
+	}
+	result, err := s.db.Exec(`UPDATE sessions SET auto_continue_enabled=?,auto_continue_total=?,auto_continue_remaining=?,auto_continue_interval_minutes=?,auto_continue_next_at=?,updated_at=datetime('now') WHERE id=?`, value, total, total, minutes, nextAt, id)
+	if err != nil {
+		return err
+	}
+	return requireAffected(result)
+}
+
+func (s *Store) disableAutoContinue(id string) error {
+	result, err := s.db.Exec(`UPDATE sessions SET auto_continue_enabled=0,auto_continue_next_at='',updated_at=datetime('now') WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	return requireAffected(result)
+}
+
+func (s *Store) rescheduleAutoContinue(id, nextAt string) error {
+	_, err := s.db.Exec(`UPDATE sessions SET auto_continue_next_at=? WHERE id=? AND auto_continue_enabled=1`, nextAt, id)
+	return err
+}
+
+func (s *Store) recordAutoContinue(id, nextAt string) error {
+	result, err := s.db.Exec(`UPDATE sessions SET auto_continue_remaining=auto_continue_remaining-1,auto_continue_enabled=CASE WHEN auto_continue_remaining<=1 THEN 0 ELSE 1 END,auto_continue_next_at=CASE WHEN auto_continue_remaining<=1 THEN '' ELSE ? END,updated_at=datetime('now') WHERE id=? AND auto_continue_enabled=1 AND auto_continue_remaining>0`, nextAt, id)
 	if err != nil {
 		return err
 	}

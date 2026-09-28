@@ -201,6 +201,7 @@ body {
   border: 1px solid var(--border);
 }
 .btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
+.btn-ghost.active { border-color: var(--success); color: var(--success); }
 
 /* ============ Session List ============ */
 .session-item {
@@ -358,7 +359,13 @@ body {
   display: flex;
   gap: 8px;
   align-items: center;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+
+.topbar .session-controls::-webkit-scrollbar { display: none; }
+.topbar .session-controls > * { flex-shrink: 0; }
 
 .chat-area {
   flex: 1;

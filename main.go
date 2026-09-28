@@ -62,6 +62,7 @@ func run() int {
 		return 1
 	}
 	if *checkFlag {
+		app.autoContinue.Stop()
 		if err := app.store.integrityCheck(); err != nil {
 			logger.Printf("health check: %v", err)
 			_ = app.store.Close()
