@@ -9,9 +9,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
+
+var version = "dev"
 
 func main() {
 	os.Exit(run())
@@ -21,7 +24,13 @@ func run() int {
 	syscall.Umask(0o077)
 	configFlag := flag.String("config", "", "path to config.json (defaults to the executable directory)")
 	checkFlag := flag.Bool("check", false, "validate configuration and database, then exit")
+	versionFlag := flag.Bool("version", false, "print version and exit")
+	databasePathFlag := flag.Bool("print-database-path", false, "print the resolved database path and exit")
 	flag.Parse()
+	if *versionFlag {
+		fmt.Println(version)
+		return 0
+	}
 	configPath, err := defaultConfigPath(*configFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -31,6 +40,14 @@ func run() int {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
+	}
+	if *databasePathFlag {
+		if strings.ContainsAny(cfg.DBPath, "\r\n") {
+			fmt.Fprintln(os.Stderr, "database path contains a line break")
+			return 1
+		}
+		fmt.Println(cfg.DBPath)
+		return 0
 	}
 	logger, logCloser, err := newErrorLogger(cfg.LogPath, cfg.Logging.MaxSizeMB)
 	if err != nil {

@@ -35,7 +35,7 @@ for architecture in $architectures; do
   (
     cd "$repo_dir"
     CGO_ENABLED=0 GOOS=linux GOARCH="$architecture" \
-      go build -buildvcs=false -trimpath -ldflags="-s -w" \
+      go build -buildvcs=false -trimpath -ldflags="-s -w -X main.version=$version" \
       -o "$stage/easyconnect" .
   )
   chmod 0755 "$stage/easyconnect"

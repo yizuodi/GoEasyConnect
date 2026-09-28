@@ -7,6 +7,7 @@ repo_name="GoEasyConnect"
 service_name="easyconnect"
 default_install_dir="/srv/GoEasyConnect"
 default_port="26890"
+backup_root="/var/backups/easyconnect"
 
 die() {
   printf 'Error: %s\n' "$*" >&2
@@ -260,6 +261,8 @@ download_latest_release() {
   local archive_name
   local checksums
   local actual_checksum
+  local checksum_file
+  local checksum_value
 
   info "Finding the latest GitHub Release..."
   release_json="$(curl --fail --location --silent --show-error \
@@ -284,9 +287,15 @@ download_latest_release() {
     "https://github.com/${repo_owner}/${repo_name}/releases/download/${release_tag}/checksums.txt" \
     || die "cannot download checksums.txt"
 
-  checksums="$(awk -v file="${archive_name}" '$2 == file {print $1}' "${temporary_dir}/checksums.txt")"
+  checksums=""
+  while read -r checksum_value checksum_file; do
+    if [[ "${checksum_file}" == "${archive_name}" ]]; then
+      checksums="${checksum_value}"
+      break
+    fi
+  done <"${temporary_dir}/checksums.txt"
   [[ "${checksums}" =~ ^[0-9a-fA-F]{64}$ ]] || die "checksum entry for ${archive_name} is missing or invalid"
-  actual_checksum="$(sha256sum "${temporary_dir}/${archive_name}" | awk '{print $1}')"
+  read -r actual_checksum _ < <(sha256sum "${temporary_dir}/${archive_name}")
   [[ "${actual_checksum,,}" == "${checksums,,}" ]] || die "checksum verification failed for ${archive_name}"
 
   mkdir -p "${temporary_dir}/package"
@@ -419,7 +428,239 @@ warn_if_agent_missing() {
   fi
 }
 
-main() {
+read_unit_value() {
+  local unit_file="$1"
+  local key="$2"
+  local line
+
+  while IFS= read -r line; do
+    case "${line}" in
+      "${key}="*)
+        printf '%s\n' "${line#*=}"
+        return 0
+        ;;
+    esac
+  done <"${unit_file}"
+  return 1
+}
+
+detect_existing_installation() {
+  local exec_start
+  local fragment_path
+  local argument
+  local expect_config="no"
+
+  fragment_path="$(systemctl show --property=FragmentPath --value "${service_name}.service")"
+  [[ -n "${fragment_path}" && -f "${fragment_path}" ]] \
+    || die "${service_name}.service is not installed; run the installer without 'upgrade' first"
+  unit_file="${fragment_path}"
+
+  service_user="$(read_unit_value "${unit_file}" User)"
+  [[ -n "${service_user}" ]] || die "cannot determine the service user from ${unit_file}"
+  getent passwd "${service_user}" >/dev/null 2>&1 || die "service user does not exist: ${service_user}"
+  resolve_service_user_details
+
+  exec_start="$(read_unit_value "${unit_file}" ExecStart)"
+  [[ -n "${exec_start}" ]] || die "cannot determine ExecStart from ${unit_file}"
+  read -r -a exec_arguments <<<"${exec_start}"
+  ((${#exec_arguments[@]} > 0)) || die "ExecStart in ${unit_file} is empty"
+  installed_binary="${exec_arguments[0]}"
+  [[ "${installed_binary}" == /* && -x "${installed_binary}" ]] \
+    || die "installed EasyConnect binary is missing or not executable: ${installed_binary}"
+  install_dir="$(realpath -m "$(dirname "${installed_binary}")")"
+  validate_install_dir "${install_dir}"
+
+  config_path="${install_dir}/config.json"
+  for argument in "${exec_arguments[@]:1}"; do
+    if [[ "${expect_config}" == "yes" ]]; then
+      config_path="${argument}"
+      expect_config="no"
+      continue
+    fi
+    case "${argument}" in
+      --config)
+        expect_config="yes"
+        ;;
+      --config=*)
+        config_path="${argument#--config=}"
+        ;;
+    esac
+  done
+  [[ "${expect_config}" == "no" ]] || die "ExecStart contains --config without a path"
+  [[ "${config_path}" == /* && -f "${config_path}" ]] \
+    || die "installed EasyConnect config is missing: ${config_path}"
+  config_path="$(realpath -m "${config_path}")"
+}
+
+remove_runtime_file() {
+  local path="$1"
+
+  if [[ -e "${path}" ]]; then
+    unlink -- "${path}"
+  fi
+}
+
+restore_database_backup() {
+  local suffix
+  local source
+  local target
+
+  for suffix in "" "-wal" "-shm"; do
+    source="${backup_dir}/database/database${suffix}"
+    target="${database_path}${suffix}"
+    if [[ -e "${source}" ]]; then
+      cp -a "${source}" "${target}"
+    else
+      remove_runtime_file "${target}"
+    fi
+  done
+}
+
+rollback_upgrade() {
+  local reason="$1"
+
+  upgrade_in_progress="no"
+  service_stopped="no"
+  trap - ERR HUP INT TERM
+  set +e
+  info "Upgrade failed: ${reason}"
+  info "Rolling back the binary and database..."
+  systemctl stop "${service_name}.service" >/dev/null 2>&1
+  install -o root -g root -m 0755 "${backup_dir}/easyconnect" "${installed_binary}.rollback"
+  mv -f "${installed_binary}.rollback" "${installed_binary}"
+  restore_database_backup
+  chown "${service_user}:${service_group}" "${database_path}" "${database_path}-wal" "${database_path}-shm" 2>/dev/null
+  systemctl daemon-reload
+  if [[ "${service_was_active}" == "yes" ]]; then
+    systemctl start "${service_name}.service"
+  fi
+  set -e
+  die "the previous version was restored; backup retained at ${backup_dir}"
+}
+
+handle_upgrade_failure() {
+  local exit_status=$?
+
+  trap - ERR HUP INT TERM
+  if [[ "${upgrade_in_progress:-no}" == "yes" ]]; then
+    rollback_upgrade "the installer exited unexpectedly (status ${exit_status})"
+  fi
+  if [[ "${service_stopped:-no}" == "yes" && "${service_was_active:-no}" == "yes" ]]; then
+    systemctl start "${service_name}.service" >/dev/null 2>&1 || true
+  fi
+  exit "${exit_status}"
+}
+
+handle_upgrade_signal() {
+  trap - ERR HUP INT TERM
+  if [[ "${upgrade_in_progress:-no}" == "yes" ]]; then
+    rollback_upgrade "the installer was interrupted"
+  fi
+  if [[ "${service_stopped:-no}" == "yes" && "${service_was_active:-no}" == "yes" ]]; then
+    systemctl start "${service_name}.service" >/dev/null 2>&1 || true
+  fi
+  die "upgrade interrupted before the installed binary was changed"
+}
+
+upgrade_main() {
+  local architecture
+  local installed_version
+  local suffix
+  local source
+
+  upgrade_in_progress="no"
+  service_stopped="no"
+
+  require_root
+  require_debian
+
+  for command_name in curl tar sha256sum install mktemp realpath systemctl getent runuser cp mv dirname unlink; do
+    command -v "${command_name}" >/dev/null 2>&1 \
+      || die "required command is missing: ${command_name}"
+  done
+
+  detect_existing_installation
+  architecture="$(detect_architecture)"
+  temporary_dir="$(mktemp -d)"
+  trap 'rm -rf -- "${temporary_dir}"' EXIT HUP INT TERM
+  trap handle_upgrade_failure ERR
+  trap handle_upgrade_signal HUP INT TERM
+  chmod 0700 "${temporary_dir}"
+  download_latest_release "${architecture}"
+
+  installed_version="$("${installed_binary}" --version 2>/dev/null || true)"
+  if [[ "${installed_version}" == "${release_version}" ]]; then
+    info "EasyConnect ${release_version} is already installed."
+    return 0
+  fi
+
+  database_path="$(env HOME="${service_home}" \
+    "${temporary_dir}/package/easyconnect" --print-database-path --config "${config_path}")" \
+    || die "the new release cannot resolve the existing database path"
+  [[ "${database_path}" == /* && "${database_path}" != *$'\n'* && "${database_path}" != *$'\r'* ]] \
+    || die "the resolved database path is invalid"
+  database_path="$(realpath -m "${database_path}")"
+
+  if systemctl is-active --quiet "${service_name}.service"; then
+    service_was_active="yes"
+  else
+    service_was_active="no"
+  fi
+
+  info "Stopping ${service_name}.service for a consistent backup..."
+  systemctl stop "${service_name}.service" \
+    || die "cannot stop ${service_name}.service"
+  service_stopped="yes"
+
+  backup_dir="${backup_root}/$(date +%Y%m%d%H%M%S)-${release_version}-$$"
+  install -d -o root -g root -m 0700 "${backup_dir}/database" \
+    || { [[ "${service_was_active}" != "yes" ]] || systemctl start "${service_name}.service"; die "cannot create ${backup_dir}"; }
+  cp -a "${installed_binary}" "${backup_dir}/easyconnect" \
+    || { [[ "${service_was_active}" != "yes" ]] || systemctl start "${service_name}.service"; die "cannot back up the installed binary"; }
+  cp -a "${config_path}" "${backup_dir}/config.json" \
+    || { [[ "${service_was_active}" != "yes" ]] || systemctl start "${service_name}.service"; die "cannot back up config.json"; }
+  cp -a "${unit_file}" "${backup_dir}/easyconnect.service" \
+    || { [[ "${service_was_active}" != "yes" ]] || systemctl start "${service_name}.service"; die "cannot back up the systemd unit"; }
+  for suffix in "" "-wal" "-shm"; do
+    source="${database_path}${suffix}"
+    if [[ -e "${source}" ]]; then
+      cp -a "${source}" "${backup_dir}/database/database${suffix}" \
+        || { [[ "${service_was_active}" != "yes" ]] || systemctl start "${service_name}.service"; die "cannot back up ${source}"; }
+    fi
+  done
+  upgrade_in_progress="yes"
+
+  info "Installing EasyConnect ${release_version}..."
+  install -o root -g root -m 0755 "${temporary_dir}/package/easyconnect" "${installed_binary}.new" \
+    || rollback_upgrade "cannot stage the new binary"
+  mv -f "${installed_binary}.new" "${installed_binary}" \
+    || rollback_upgrade "cannot replace the installed binary"
+
+  if ! runuser -u "${service_user}" -- env HOME="${service_home}" \
+    "${installed_binary}" --check --config "${config_path}"; then
+    rollback_upgrade "configuration or database validation failed"
+  fi
+
+  if [[ "${service_was_active}" == "yes" ]]; then
+    systemctl start "${service_name}.service" \
+      || rollback_upgrade "the upgraded service did not start"
+    systemctl is-active --quiet "${service_name}.service" \
+      || rollback_upgrade "the upgraded service is not active"
+  fi
+  upgrade_in_progress="no"
+  service_stopped="no"
+  trap - ERR HUP INT TERM
+
+  info "EasyConnect was upgraded from ${installed_version:-an unversioned build} to ${release_version}."
+  info "Backup: ${backup_dir}"
+  if [[ "${service_was_active}" == "yes" ]]; then
+    info "Service: systemctl status ${service_name}"
+  else
+    info "The service was inactive before the upgrade and remains inactive."
+  fi
+}
+
+install_main() {
   local architecture
   local archive_name
   local reuse_config
@@ -429,7 +670,7 @@ main() {
   require_root
   require_debian
 
-  for command_name in curl tar sha256sum awk install mktemp realpath systemctl getent runuser; do
+  for command_name in curl tar sha256sum install mktemp realpath systemctl getent runuser; do
     command -v "${command_name}" >/dev/null 2>&1 \
       || die "required command is missing: ${command_name}"
   done
@@ -437,7 +678,7 @@ main() {
   architecture="$(detect_architecture)"
 
   if [[ -r /etc/systemd/system/${service_name}.service ]]; then
-    existing_user="$(awk -F= '$1 == "User" {print $2; exit}' /etc/systemd/system/${service_name}.service)"
+    existing_user="$(read_unit_value "/etc/systemd/system/${service_name}.service" User || true)"
     [[ -n "${existing_user}" ]] || existing_user="easyconnect"
   fi
 
@@ -554,4 +795,18 @@ main() {
   info "API keys and Claude/Codex profiles can be configured in the web UI after login."
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  case "${1:-install}" in
+    install)
+      (($# <= 1)) || die "usage: install.sh [install|upgrade]"
+      install_main
+      ;;
+    upgrade)
+      (($# == 1)) || die "usage: install.sh [install|upgrade]"
+      upgrade_main
+      ;;
+    *)
+      die "usage: install.sh [install|upgrade]"
+      ;;
+  esac
+fi

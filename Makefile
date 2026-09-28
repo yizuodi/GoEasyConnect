@@ -10,6 +10,7 @@ package:
 
 test:
 	CGO_ENABLED=0 go test -buildvcs=false ./...
+	bash scripts/install_test.sh
 
 vet:
 	CGO_ENABLED=0 go vet ./...

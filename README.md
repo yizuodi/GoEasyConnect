@@ -44,6 +44,20 @@ curl -fsSL https://raw.githubusercontent.com/yizuodi/GoEasyConnect/main/scripts/
 带时间戳的备份。AI 会话 sudo 提权默认开启；这会让掌握 Web 访问密码或 AI
 会话的用户具备系统级修改能力，请仅在信任环境中启用。
 
+### 升级
+
+通过安装脚本部署的实例可以显式执行无交互升级：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yizuodi/GoEasyConnect/main/scripts/install.sh | sudo bash -s -- upgrade
+```
+
+升级器从 `easyconnect.service` 自动识别二进制、配置和运行用户，下载并校验最新
+Release，然后停止服务并将原二进制、配置、systemd unit 及 SQLite 数据库备份到
+`/var/backups/easyconnect/`。新版本会先执行配置和数据库检查；检查失败或原先处于
+运行状态的服务无法重新启动时，升级器自动恢复原二进制和数据库。原服务升级前
+未运行时，升级完成后仍保持未运行。自定义 unit 中的 `ExecStart` 路径不能包含空格。
+
 ## 构建与运行
 
 项目不需要 Node.js、npm 或 CGO：
