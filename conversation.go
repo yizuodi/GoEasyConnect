@@ -19,7 +19,10 @@ import (
 )
 
 const (
-	maxCodexJSONLine = 2 * 1024 * 1024
+	// A thread/resume response can contain a complete historical turn in one
+	// JSON-RPC line. Long-running sessions may exceed a few megabytes, so keep
+	// enough headroom for history import while still bounding memory usage.
+	maxCodexJSONLine = 64 * 1024 * 1024
 	maxToolOutput    = 128 * 1024
 	rpcTimeout       = 20 * time.Second
 )
