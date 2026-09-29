@@ -135,6 +135,20 @@ function toggleSidebar() {
   scheduleTerminalFit(220);
 }
 
+function setToolbarMoreOpen(open) {
+  const container = document.getElementById('toolbarMore');
+  const button = document.getElementById('toolbarMoreToggle');
+  if (!container || !button) return;
+  container.classList.toggle('open', open);
+  button.setAttribute('aria-expanded', String(open));
+}
+
+function toggleToolbarMore(event) {
+  event?.stopPropagation();
+  const container = document.getElementById('toolbarMore');
+  setToolbarMoreOpen(!container?.classList.contains('open'));
+}
+
 function fullscreenElement() {
   return document.fullscreenElement || document.webkitFullscreenElement || null;
 }
@@ -380,6 +394,7 @@ function renderSessions() {
 }
 
 async function selectSession(id) {
+  setToolbarMoreOpen(false);
   currentSessionId = id;
   const s = sessions.find(x => x.id === id);
   if (!s) {
@@ -435,9 +450,12 @@ function updateSessionControls(s) {
   if (autoContinue) {
     autoContinue.classList.toggle('hidden', s.agent !== 'codex');
     autoContinue.classList.toggle('active', Boolean(s.auto_continue_enabled));
-    autoContinue.textContent = s.auto_continue_enabled
-      ? `⏱ 自动继续 ${s.auto_continue_remaining}`
-      : '⏱ 自动继续';
+    const autoContinueLabel = autoContinue.querySelector('.auto-continue-label');
+    if (autoContinueLabel) {
+      autoContinueLabel.textContent = s.auto_continue_enabled
+        ? `自动继续 ${s.auto_continue_remaining}`
+        : '自动继续';
+    }
     autoContinue.title = s.auto_continue_enabled
       ? `已开启：剩余 ${s.auto_continue_remaining}/${s.auto_continue_total} 次，每 ${s.auto_continue_interval_minutes} 分钟检查`
       : '配置 Codex 自动继续';
@@ -1256,6 +1274,11 @@ function closeModal() {
 
 document.addEventListener('click', e => {
   if (e.target.id === 'modalOverlay') closeModal();
+  if (!e.target.closest('#toolbarMore')) setToolbarMoreOpen(false);
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') setToolbarMoreOpen(false);
 });
 
 // ============ Helpers ============

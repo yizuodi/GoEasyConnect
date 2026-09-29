@@ -293,6 +293,7 @@ body {
   flex-direction: column;
   min-width: 0;
   position: relative;
+  container-type: inline-size;
 }
 
 .view-controls {
@@ -360,12 +361,73 @@ body {
   gap: 8px;
   align-items: center;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+  overflow: visible;
 }
 
-.topbar .session-controls::-webkit-scrollbar { display: none; }
 .topbar .session-controls > * { flex-shrink: 0; }
+
+.toolbar-more {
+  display: contents;
+}
+
+.toolbar-more-toggle {
+  display: none;
+}
+
+.toolbar-more-menu {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@container (max-width: 1150px) {
+  .toolbar-more {
+    display: block;
+    position: relative;
+  }
+
+  .toolbar-more-toggle {
+    display: inline-flex;
+  }
+
+  .toolbar-more-menu {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 100;
+    width: 230px;
+    padding: 10px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  }
+
+  .toolbar-more.open .toolbar-more-menu {
+    display: flex;
+  }
+
+  .toolbar-more-menu .btn,
+  .toolbar-more-menu .profile-select,
+  .toolbar-more-menu .skip-perm-toggle,
+  .toolbar-more-menu .skip-perm-toggle span {
+    width: 100%;
+    max-width: none;
+  }
+
+  .toolbar-more-menu .btn,
+  .toolbar-more-menu .skip-perm-toggle span {
+    justify-content: flex-start;
+  }
+
+  .toolbar-more-menu .skip-perm-toggle {
+    padding: 0;
+  }
+}
 
 .chat-area {
   flex: 1;

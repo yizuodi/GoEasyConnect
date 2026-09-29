@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>EasyConnect</title>
-  <link rel="stylesheet" href="/style.css?v=1778644800">
+  <link rel="stylesheet" href="/style.css?v=1790645400">
   <link rel="preload" href="/xterm.css?v=1778644800" as="style" onload="this.rel='stylesheet'">
   <noscript><link rel="stylesheet" href="/xterm.css?v=1778644800"></noscript>
 </head>
@@ -56,16 +56,21 @@
               <button class="btn btn-sm btn-ghost active" id="terminalModeBtn" onclick="switchSessionMode('terminal')">原生终端</button>
               <button class="btn btn-sm btn-ghost" id="conversationModeBtn" onclick="switchSessionMode('conversation')">对话模式</button>
             </div>
-            <select id="profileSelect" class="profile-select hidden" onchange="changeProfile()" title="切换配置（仅停止时）">
-              <option value="">默认配置</option>
-            </select>
-            <label class="skip-perm-toggle" id="skipPermLabel" title="跳过权限确认（仅停止时可切换）">
-              <input type="checkbox" id="skipPermCheck" onchange="toggleSkipPerm()">
-              <span>🔓 Skip Perms</span>
-            </label>
-            <button class="btn btn-sm btn-ghost hidden" id="autoContinueBtn" onclick="showAutoContinueModal()" title="配置 Codex 自动继续">⏱ 自动继续</button>
-            <button class="btn btn-sm btn-ghost" id="pollToggle" onclick="togglePolling()" title="切换连接模式">🔌 WebSocket</button>
-            <button class="btn btn-sm btn-ghost" id="btnFiles" onclick="openFileBrowser()" title="在文件管理器中打开工作目录">📁 文件</button>
+            <div class="toolbar-more" id="toolbarMore">
+              <button type="button" class="btn btn-sm btn-ghost toolbar-more-toggle" id="toolbarMoreToggle" onclick="toggleToolbarMore(event)" aria-expanded="false" aria-haspopup="true" aria-controls="toolbarMoreMenu">••• 更多</button>
+              <div class="toolbar-more-menu" id="toolbarMoreMenu" aria-label="更多会话操作">
+                <select id="profileSelect" class="profile-select hidden" onchange="changeProfile()" title="切换配置（仅停止时）">
+                  <option value="">默认配置</option>
+                </select>
+                <label class="skip-perm-toggle" id="skipPermLabel" title="跳过权限确认（仅停止时可切换）">
+                  <input type="checkbox" id="skipPermCheck" onchange="toggleSkipPerm()">
+                  <span>🔓 Skip Perms</span>
+                </label>
+                <button class="btn btn-sm btn-ghost hidden" id="autoContinueBtn" onclick="showAutoContinueModal()" title="配置 Codex 自动继续"><span aria-hidden="true">⏱</span><span class="auto-continue-label">自动继续</span></button>
+                <button class="btn btn-sm btn-ghost" id="pollToggle" onclick="togglePolling()" title="切换连接模式">🔌 WebSocket</button>
+                <button class="btn btn-sm btn-ghost" id="btnFiles" onclick="openFileBrowser()" title="在文件管理器中打开工作目录">📁 文件</button>
+              </div>
+            </div>
             <span id="sessionStatus" style="font-size:12px;color:var(--text-secondary)"></span>
             <button class="btn btn-sm btn-ghost" id="btnStart" onclick="startSession()">▶ 启动</button>
             <button class="btn btn-sm btn-ghost" id="btnStop" onclick="stopSession()">■ 停止</button>
@@ -142,6 +147,6 @@
   </script>
   <script src="/xterm.js?v=1778644800" async></script>
   <script src="/xterm-addon-fit.js?v=1778644800" async></script>
-  <script src="/app.js?v=1778644800" async></script>
+  <script src="/app.js?v=1790645400" async></script>
 </body>
 </html>
