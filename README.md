@@ -14,14 +14,14 @@ GoEasyConnect 是一个面向小型、自托管、单机环境的 Claude Code �
 
 - Claude Code 与 Codex 会话创建、启动、停止、恢复及终端访问
 - 桌面端和移动端界面，支持 WebSocket 与 HTTP 轮询
-- 可选的 Codex 对话模式，保留原生终端作为回退
+- 可选的 Claude Code/Codex 对话模式，保留原生终端作为回退
 - Claude JSON 和 Codex TOML 配置档
 - Codex 自定义 OpenAI-compatible Provider，无需执行 `codex login`
 - API Key 仅注入目标进程，不写入 Codex TOML、命令参数或错误日志
 - 兼容 EasyClaude/EasyConnect SQLite Schema，并自动执行增量迁移
 - SQLite WAL、`0600` 敏感文件权限和有大小上限的 `error.log`
 - 有界终端、轮询和 WebSocket 缓冲，适合资源有限的单机环境
-- Codex 自动继续：按周期检测任务是否结束，空闲时限次发送“继续”
+- Claude Code/Codex 自动继续：按周期检测任务是否结束，空闲时限次发送“继续”
 
 ## 系统要求
 
@@ -101,9 +101,9 @@ openssl rand -base64 32
 
 完整设置及安全占位值见 [`config.example.json`](config.example.json)。
 
-### Codex 对话模式
+### 对话模式
 
-在 `config.json` 中显式开启后，新建或已停止的 Codex 会话可以选择“原生终端”或
+在 `config.json` 中显式开启后，新建或已停止的 Claude Code/Codex 会话可以选择“原生终端”或
 “对话模式”作为启动模式：
 
 ```json
@@ -112,23 +112,24 @@ openssl rand -base64 32
 }
 ```
 
-对话模式会启动一个常驻的 `codex app-server`，保存结构化消息、命令和文件变更
-事件；原生终端模式仍直接运行官方 Codex TUI。两种模式沿用同一个 Codex thread
-ID，因此停止后切换模式仍能继续已提交的对话历史，但不会同步两侧未发送的草稿。
-模式在运行中锁定，必须先停止会话才能切换并重新启动。
+Codex 对话模式启动常驻 `codex app-server`；Claude Code 对话模式使用官方
+`stream-json` 输入输出协议。两者都会保存结构化消息、命令和文件变更事件；原生
+终端模式仍直接运行官方 TUI。两种模式沿用各代理的原生 session/thread ID，因此
+停止后切换模式仍能继续已提交的历史，但不会同步两侧未发送的草稿。模式在运行中
+锁定，必须先停止会话才能切换并重新启动。
 
-第一版仅支持 Codex 对话，且启动前必须启用 `Skip Perms`；这等同于允许 Codex
-无需审批执行命令和修改文件，请只在受信任的单用户环境中使用。停止对话中的回复
-只会调用 `turn/interrupt`，不会关闭 app-server；顶部“停止”才会结束整个会话。
+对话模式启动前必须启用 `Skip Perms`；这等同于允许代理无需审批执行命令和修改
+文件，请只在受信任的单用户环境中使用。停止对话中的回复只会中断当前 turn，不会
+关闭常驻进程；顶部“停止”才会结束整个会话。
 
-### Codex 自动继续
+### 自动继续
 
-Codex 会话顶部的“自动继续”按钮可以开启服务端自动继续。每次开启可设置触发次数和
+Claude Code/Codex 会话顶部的“自动继续”按钮可以开启服务端自动继续。每次开启可设置触发次数和
 检查周期，周期默认 20 分钟；达到触发次数后自动关闭，也可随时手动关闭。只有
-Codex 会话进程仍在运行且当前任务已经结束时才会发送“继续”，执行中的检查不会
-消耗次数。对话模式使用 app-server 的 turn 状态判断；原生终端模式读取 Codex
-会话 JSONL 中的 `task_started`、`task_complete` 和 `turn_aborted` 事件。状态无法
-确认时不会发送。会话停止后暂停检测，重新启动后从一个完整周期重新计时。
+会话进程仍在运行且当前任务已经结束时才会发送“继续”，执行中的检查不会消耗次数。
+对话模式使用常驻进程的 turn 状态；原生终端模式读取代理原生会话 JSONL 的任务或
+`stop_reason` 状态。状态无法确认时不会发送。会话停止后暂停检测，重新启动后从一个
+完整周期重新计时。
 
 ## systemd 部署
 

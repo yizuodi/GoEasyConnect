@@ -411,7 +411,7 @@ async function selectSession(id) {
 
   disconnectAll();
   stopConversationPolling();
-  const conversationEnabled = Boolean(appConfig.experimental?.conversationMode && s.agent === 'codex');
+  const conversationEnabled = Boolean(appConfig.experimental?.conversationMode);
   document.getElementById('sessionModeSwitch').classList.toggle('hidden', !conversationEnabled);
   sessionMode = conversationEnabled ? (s.running_mode || s.run_mode || 'terminal') : 'terminal';
   updateSessionControls(s);
@@ -448,7 +448,7 @@ function updateSessionControls(s) {
   updateConversationWarning(s);
   const autoContinue = document.getElementById('autoContinueBtn');
   if (autoContinue) {
-    autoContinue.classList.toggle('hidden', s.agent !== 'codex');
+    autoContinue.classList.toggle('hidden', false);
     autoContinue.classList.toggle('active', Boolean(s.auto_continue_enabled));
     const autoContinueLabel = autoContinue.querySelector('.auto-continue-label');
     if (autoContinueLabel) {
@@ -458,21 +458,21 @@ function updateSessionControls(s) {
     }
     autoContinue.title = s.auto_continue_enabled
       ? `已开启：剩余 ${s.auto_continue_remaining}/${s.auto_continue_total} 次，每 ${s.auto_continue_interval_minutes} 分钟检查`
-      : '配置 Codex 自动继续';
+      : `配置 ${s.agent === 'codex' ? 'Codex' : 'Claude Code'} 自动继续`;
   }
 }
 
 function showAutoContinueModal() {
   const session = sessions.find(item => item.id === currentSessionId);
-  if (!session || session.agent !== 'codex') return;
+  if (!session) return;
   const defaults = appConfig.autoContinueDefaults || {};
   const count = session.auto_continue_enabled
     ? session.auto_continue_total
     : (session.auto_continue_total || defaults.triggerCount || 3);
   const minutes = session.auto_continue_interval_minutes || defaults.intervalMinutes || 20;
   showModal(`
-    <h3>Codex 自动继续</h3>
-    <p style="color:var(--text-secondary);font-size:13px;line-height:1.6;margin-bottom:12px;">服务端按周期检测 Codex 是否已结束当前执行；空闲时自动发送“继续”。会话停止时暂停，重新启动后恢复计时。</p>
+    <h3>${session.agent === 'codex' ? 'Codex' : 'Claude Code'} 自动继续</h3>
+    <p style="color:var(--text-secondary);font-size:13px;line-height:1.6;margin-bottom:12px;">服务端按周期检测会话是否已结束当前执行；空闲时自动发送“继续”。会话停止时暂停，重新启动后恢复计时。</p>
     <div class="form-group">
       <label>触发次数</label>
       <input id="mAutoContinueCount" type="number" min="1" max="1000" value="${count}">
@@ -692,7 +692,7 @@ function renderConversationMessages(messages) {
     if (!messages.length) {
       const empty = document.createElement('div');
       empty.className = 'conversation-empty';
-      empty.textContent = 'Codex 对话模式\n停止会话后可切换到原生终端';
+      empty.textContent = '对话模式\n停止会话后可切换到原生终端';
       container.prepend(empty);
     } else {
       for (const message of messages) {
@@ -729,7 +729,7 @@ function renderConversationEvents() {
       if (event.type === 'turn.failed') {
         const error = document.createElement('div');
         error.className = 'conversation-error';
-        error.textContent = payload.message || 'Codex 执行失败';
+        error.textContent = payload.message || '执行失败';
         container.insertBefore(error, anchor);
         continue;
       }
@@ -973,8 +973,7 @@ function updateNewSessionAgent() {
   const select = document.getElementById('mProfile');
   if (select) populateProfileSelect(select, agent);
   const modeGroup = document.getElementById('mModeGroup');
-  if (modeGroup) modeGroup.classList.toggle('hidden', agent !== 'codex' || !appConfig.experimental?.conversationMode);
-  if (agent !== 'codex' && document.getElementById('mRunMode')) document.getElementById('mRunMode').value = 'terminal';
+  if (modeGroup) modeGroup.classList.toggle('hidden', !appConfig.experimental?.conversationMode);
 }
 
 async function createSession() {
@@ -983,7 +982,7 @@ async function createSession() {
   const profile_id = document.getElementById('mProfile').value || null;
   const agent = document.getElementById('mAgent').value;
   const working_dir = document.getElementById('mWorkDir').value.trim() || appDefaults.workingDir || '/home/user/code';
-  const run_mode = agent === 'codex' && appConfig.experimental?.conversationMode
+  const run_mode = appConfig.experimental?.conversationMode
     ? document.getElementById('mRunMode').value : 'terminal';
 
   const r = await api('/api/sessions', {

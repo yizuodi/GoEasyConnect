@@ -30,6 +30,28 @@ func TestReadCodexTaskState(t *testing.T) {
 	}
 }
 
+func TestReadClaudeTaskState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	write := func(content string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"work\"}}\n")
+	if busy, known := readClaudeTaskState(path); !known || !busy {
+		t.Fatalf("prompt state busy=%v known=%v", busy, known)
+	}
+	write("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"work\"}}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\"}],\"stop_reason\":\"tool_use\"}}\n")
+	if busy, known := readClaudeTaskState(path); !known || !busy {
+		t.Fatalf("tool state busy=%v known=%v", busy, known)
+	}
+	write("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"work\"}}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"stop_reason\":\"end_turn\"}}\n")
+	if busy, known := readClaudeTaskState(path); !known || busy {
+		t.Fatalf("complete state busy=%v known=%v", busy, known)
+	}
+}
+
 func TestAutoContinueOnlyConsumesSuccessfulIdleChecks(t *testing.T) {
 	cfg := testConfig(t)
 	app := testApp(t, cfg)

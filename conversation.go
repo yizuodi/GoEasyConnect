@@ -25,9 +25,10 @@ const (
 )
 
 type ConversationManager struct {
-	app     *App
-	mu      sync.RWMutex
-	running map[string]*AppServerSession
+	app           *App
+	mu            sync.RWMutex
+	running       map[string]*AppServerSession
+	claudeRunning map[string]*ClaudeConversationSession
 }
 
 type AppServerSession struct {
@@ -75,7 +76,10 @@ type codexAppRuntime struct {
 }
 
 func newConversationManager(app *App) *ConversationManager {
-	return &ConversationManager{app: app, running: make(map[string]*AppServerSession)}
+	return &ConversationManager{
+		app: app, running: make(map[string]*AppServerSession),
+		claudeRunning: make(map[string]*ClaudeConversationSession),
+	}
 }
 
 func (m *ConversationManager) get(sessionID string) *AppServerSession {
@@ -84,9 +88,20 @@ func (m *ConversationManager) get(sessionID string) *AppServerSession {
 	return m.running[sessionID]
 }
 
-func (m *ConversationManager) IsRunning(sessionID string) bool { return m.get(sessionID) != nil }
+func (m *ConversationManager) getClaude(sessionID string) *ClaudeConversationSession {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.claudeRunning[sessionID]
+}
+
+func (m *ConversationManager) IsRunning(sessionID string) bool {
+	return m.get(sessionID) != nil || m.getClaude(sessionID) != nil
+}
 
 func (m *ConversationManager) IsTurnRunning(sessionID string) bool {
+	if claude := m.getClaude(sessionID); claude != nil {
+		return claude.isTurnRunning()
+	}
 	server := m.get(sessionID)
 	if server == nil {
 		return false
@@ -100,14 +115,17 @@ func (m *ConversationManager) StartSession(session Session) error {
 	if !m.app.cfg.Experimental.ConversationMode {
 		return errors.New("Conversation mode is disabled")
 	}
-	if session.Agent != "codex" {
-		return errors.New("Conversation mode currently supports Codex only")
-	}
 	if session.RunMode != "conversation" {
 		return errors.New("Session is not configured for conversation mode")
 	}
 	if session.SkipPermissions == 0 {
-		return errors.New("Enable Skip Perms before using experimental conversation mode")
+		return errors.New("Enable Skip Perms before using conversation mode")
+	}
+	if session.Agent == "claude" {
+		return m.startClaudeSession(session)
+	}
+	if session.Agent != "codex" {
+		return errors.New("Unsupported conversation agent")
 	}
 	runtime, err := m.app.codexAppRuntime(session)
 	if err != nil {
@@ -115,7 +133,7 @@ func (m *ConversationManager) StartSession(session Session) error {
 	}
 
 	m.mu.Lock()
-	if _, exists := m.running[session.ID]; exists {
+	if _, exists := m.running[session.ID]; exists || m.claudeRunning[session.ID] != nil {
 		m.mu.Unlock()
 		return errors.New("Session already running")
 	}
@@ -248,6 +266,9 @@ func (a *App) codexAppRuntime(session Session) (codexAppRuntime, error) {
 }
 
 func (m *ConversationManager) StartTurn(sessionID, prompt, assistantID, clientMessageID string) (string, error) {
+	if claude := m.getClaude(sessionID); claude != nil {
+		return claude.startTurn(prompt, assistantID, clientMessageID)
+	}
 	server := m.get(sessionID)
 	if server == nil {
 		return "", errors.New("Conversation session is not running")
@@ -290,6 +311,9 @@ func (m *ConversationManager) StartTurn(sessionID, prompt, assistantID, clientMe
 }
 
 func (m *ConversationManager) InterruptTurn(sessionID string) bool {
+	if claude := m.getClaude(sessionID); claude != nil {
+		return claude.interruptTurn()
+	}
 	server := m.get(sessionID)
 	if server == nil {
 		return false
@@ -311,6 +335,9 @@ func (m *ConversationManager) InterruptTurn(sessionID string) bool {
 }
 
 func (m *ConversationManager) StopSession(sessionID string) bool {
+	if claude := m.getClaude(sessionID); claude != nil {
+		return claude.stop()
+	}
 	server := m.get(sessionID)
 	if server == nil {
 		return false
@@ -332,9 +359,16 @@ func (m *ConversationManager) stopAll() {
 	for _, server := range m.running {
 		servers = append(servers, server)
 	}
+	claudeSessions := make([]*ClaudeConversationSession, 0, len(m.claudeRunning))
+	for _, session := range m.claudeRunning {
+		claudeSessions = append(claudeSessions, session)
+	}
 	m.mu.RUnlock()
 	for _, server := range servers {
 		m.StopSession(server.sessionID)
+	}
+	for _, session := range claudeSessions {
+		session.stop()
 	}
 }
 
@@ -673,18 +707,7 @@ func (s *AppServerSession) importTurns(turns []json.RawMessage) error {
 
 func (s *AppServerSession) emit(eventType, turnID, itemID string, payload map[string]any) {
 	payload = redactPayload(payload, s.apiKey).(map[string]any)
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return
-	}
-	if len(encoded) > maxToolOutput {
-		payload = map[string]any{"message": "Event details exceeded the display limit", "truncated": true}
-		encoded, _ = json.Marshal(payload)
-	}
-	event := ConversationEvent{ID: uuid.NewString(), SessionID: s.sessionID, TurnID: turnID, ItemID: itemID, Type: eventType, Payload: payload}
-	if err := s.manager.app.store.createConversationEvent(&event, encoded); err != nil {
-		s.manager.app.logError("save conversation event", err)
-	}
+	emitConversationEvent(s.manager.app, s.sessionID, eventType, turnID, itemID, payload)
 }
 
 func stringField(value map[string]any, key string) string {

@@ -69,10 +69,6 @@ func (a *App) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Mode must be terminal or conversation"})
 		return
 	}
-	if request.RunMode == "conversation" && request.Agent != "codex" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Conversation mode currently supports Codex only"})
-		return
-	}
 	if request.RunMode == "conversation" && !a.cfg.Experimental.ConversationMode {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Conversation mode is disabled"})
 		return
@@ -231,10 +227,6 @@ func (a *App) handleAutoContinue(w http.ResponseWriter, r *http.Request) {
 		a.writeInternalError(w, "get auto-continue session", err)
 		return
 	}
-	if session.Agent != "codex" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Auto-continue supports Codex sessions only"})
-		return
-	}
 	var request struct {
 		Enabled         bool `json:"enabled"`
 		TriggerCount    int  `json:"trigger_count"`
@@ -292,10 +284,6 @@ func (a *App) handleSessionMode(w http.ResponseWriter, r *http.Request) {
 	if request.Mode == "conversation" {
 		if !a.cfg.Experimental.ConversationMode {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Conversation mode is disabled"})
-			return
-		}
-		if session.Agent != "codex" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Conversation mode currently supports Codex only"})
 			return
 		}
 	}
@@ -491,10 +479,6 @@ func (a *App) handleCreateConversationMessage(w http.ResponseWriter, r *http.Req
 	}
 	if err != nil {
 		a.writeInternalError(w, "get conversation session", err)
-		return
-	}
-	if session.Agent != "codex" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Conversation mode currently supports Codex only"})
 		return
 	}
 	if session.RunMode != "conversation" || !a.conversations.IsRunning(session.ID) {

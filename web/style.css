@@ -515,7 +515,7 @@ body {
 }
 
 .conversation-message.assistant:empty::after {
-  content: 'Codex 正在思考…';
+  content: '正在思考…';
   color: var(--text-secondary);
 }
 

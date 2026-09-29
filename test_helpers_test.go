@@ -28,6 +28,7 @@ func testConfig(t *testing.T) *Config {
 		DefaultWorkingDir: filepath.Join(root, "work"),
 		ClaudeSettingsDir: filepath.Join(root, ".claude", "settings"),
 		ClaudeProjectsDir: filepath.Join(root, ".claude", "projects"),
+		ClaudeUserHome:    root,
 		CodexHome:         filepath.Join(root, ".codex"),
 		CodexSessionsDir:  filepath.Join(root, ".codex", "sessions"),
 		CodexUserHome:     root,

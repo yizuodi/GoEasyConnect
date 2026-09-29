@@ -149,7 +149,7 @@ func TestSessionRunModeAPI(t *testing.T) {
 	claudeResponse := requestJSON(t, server.URL, cfg.Auth.Password, http.MethodPost, "/api/sessions", map[string]any{
 		"name": "claude-conversation", "agent": "claude", "working_dir": cfg.DefaultWorkingDir, "run_mode": "conversation",
 	})
-	if claudeResponse.StatusCode != http.StatusBadRequest {
+	if claudeResponse.StatusCode != http.StatusOK {
 		t.Fatalf("Claude conversation status=%d body=%s", claudeResponse.StatusCode, readBody(t, claudeResponse))
 	}
 	claudeResponse.Body.Close()
@@ -238,10 +238,13 @@ func TestAutoContinueAPI(t *testing.T) {
 	response = requestJSON(t, server.URL, cfg.Auth.Password, http.MethodPut, "/api/sessions/"+claude.ID+"/auto-continue", map[string]any{
 		"enabled": true, "trigger_count": 3, "interval_minutes": 20,
 	})
-	if response.StatusCode != http.StatusBadRequest {
+	if response.StatusCode != http.StatusOK {
 		t.Fatalf("Claude auto-continue status=%d body=%s", response.StatusCode, readBody(t, response))
 	}
-	response.Body.Close()
+	decodeBody(t, response, &updated)
+	if !updated.AutoContinueEnabled || updated.AutoContinueRemain != 3 {
+		t.Fatalf("Claude auto-continue session=%#v", updated)
+	}
 }
 
 func TestUpdateSessionAPI(t *testing.T) {

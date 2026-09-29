@@ -207,11 +207,180 @@ func TestConversationModeValidation(t *testing.T) {
 		t.Fatalf("disabled error=%v", err)
 	}
 	cfg.Experimental.ConversationMode = true
-	if err := app.conversations.StartSession(Session{Agent: "claude", RunMode: "conversation", SkipPermissions: 1}); err == nil || !strings.Contains(err.Error(), "Codex only") {
-		t.Fatalf("Claude error=%v", err)
-	}
 	if err := app.conversations.StartSession(Session{Agent: "codex", RunMode: "conversation"}); err == nil || !strings.Contains(err.Error(), "Skip Perms") {
 		t.Fatalf("permissions error=%v", err)
+	}
+	if err := app.conversations.StartSession(Session{Agent: "claude", RunMode: "conversation"}); err == nil || !strings.Contains(err.Error(), "Skip Perms") {
+		t.Fatalf("Claude permissions error=%v", err)
+	}
+}
+
+func TestClaudeStreamJSONPersistsAcrossTurns(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Experimental.ConversationMode = true
+	requestLog := filepath.Join(cfg.BaseDir, "claude-stream-requests.jsonl")
+	cfg.Claude.Binary = fakeClaudeStreamLauncher(t, requestLog)
+	if err := os.MkdirAll(cfg.DefaultWorkingDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	app := testApp(t, cfg)
+	session := Session{ID: "claude-conversation", Agent: "claude", WorkingDir: cfg.DefaultWorkingDir, RunMode: "conversation", SkipPermissions: 1}
+	if err := app.store.createSession(session); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store.setSkipPermissions(session.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.conversations.StartSession(session); err != nil {
+		t.Fatal(err)
+	}
+	for index, prompt := range []string{"hello", "again"} {
+		userID, assistantID := fmt.Sprintf("claude-user-%d", index), fmt.Sprintf("claude-assistant-%d", index)
+		if err := app.store.createConversationMessage(Message{ID: userID, SessionID: session.ID, Role: "user", Content: prompt, SourceID: userID}); err != nil {
+			t.Fatal(err)
+		}
+		if err := app.store.createConversationMessage(Message{ID: assistantID, SessionID: session.ID, Role: "assistant"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := app.conversations.StartTurn(session.ID, prompt, assistantID, userID); err != nil {
+			t.Fatal(err)
+		}
+		waitForTurn(t, app, session.ID)
+	}
+	if !app.conversations.IsRunning(session.ID) {
+		t.Fatal("Claude stream-json process exited between turns")
+	}
+	messages, err := app.store.listMessagesByChannel(session.ID, "conversation", 10, 0)
+	if err != nil || len(messages) != 4 || messages[1].Content != "answer: hello" || messages[3].Content != "answer: again" {
+		t.Fatalf("messages=%#v err=%v", messages, err)
+	}
+	stored, err := app.store.getSession(session.ID)
+	if err != nil || stored.ClaudeSessionID == "" {
+		t.Fatalf("session=%#v err=%v", stored, err)
+	}
+	if !app.conversations.StopSession(session.ID) {
+		t.Fatal("Claude stream-json process did not stop")
+	}
+}
+
+func TestClaudeStreamJSONInterruptsTurnWithoutStoppingSession(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Experimental.ConversationMode = true
+	t.Setenv("FAKE_CLAUDE_HOLD_TURN", "1")
+	cfg.Claude.Binary = fakeClaudeStreamLauncher(t, filepath.Join(cfg.BaseDir, "claude-interrupt.jsonl"))
+	if err := os.MkdirAll(cfg.DefaultWorkingDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	app := testApp(t, cfg)
+	session := Session{ID: "claude-interrupt", Agent: "claude", WorkingDir: cfg.DefaultWorkingDir, RunMode: "conversation", SkipPermissions: 1}
+	if err := app.store.createSession(session); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.conversations.StartSession(session); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store.createConversationMessage(Message{ID: "assistant", SessionID: session.ID, Role: "assistant"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.conversations.StartTurn(session.ID, "wait", "assistant", "user"); err != nil {
+		t.Fatal(err)
+	}
+	if !app.conversations.InterruptTurn(session.ID) {
+		t.Fatal("Claude interrupt was not sent")
+	}
+	waitForTurn(t, app, session.ID)
+	if !app.conversations.IsRunning(session.ID) {
+		t.Fatal("Claude interrupt stopped the session")
+	}
+	messages, err := app.store.listMessagesByChannel(session.ID, "conversation", 10, 0)
+	if err != nil || len(messages) != 0 {
+		t.Fatalf("empty interrupted response was retained: messages=%#v err=%v", messages, err)
+	}
+	if err := app.store.createConversationMessage(Message{ID: "assistant-after-interrupt", SessionID: session.ID, Role: "assistant"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.conversations.StartTurn(session.ID, "continue after interrupt", "assistant-after-interrupt", "user-after-interrupt"); err != nil {
+		t.Fatal(err)
+	}
+	waitForTurn(t, app, session.ID)
+	messages, err = app.store.listMessagesByChannel(session.ID, "conversation", 10, 0)
+	if err != nil || len(messages) != 1 || messages[0].Content != "answer: continue after interrupt" {
+		t.Fatalf("post-interrupt messages=%#v err=%v", messages, err)
+	}
+	app.conversations.StopSession(session.ID)
+}
+
+func TestClaudeResumeImportsHistoryWithoutToolResultDuplicates(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Experimental.ConversationMode = true
+	requestLog := filepath.Join(cfg.BaseDir, "claude-resume.jsonl")
+	cfg.Claude.Binary = fakeClaudeStreamLauncher(t, requestLog)
+	if err := os.MkdirAll(cfg.DefaultWorkingDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	claudeID := "11111111-2222-4333-8444-555555555555"
+	transcriptDir := filepath.Join(cfg.ClaudeProjectsDir, "project")
+	if err := os.MkdirAll(transcriptDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	records := []string{
+		`{"type":"user","uuid":"user-1","message":{"role":"user","content":"first question"}}`,
+		`{"type":"assistant","uuid":"assistant-1a","message":{"role":"assistant","content":[{"type":"text","text":"working "},{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"pwd"}}],"stop_reason":"tool_use"}}`,
+		`{"type":"user","uuid":"tool-result","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1","content":"/tmp"}]}}`,
+		`{"type":"assistant","uuid":"assistant-1b","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn"}}`,
+		`{"type":"user","uuid":"meta-user","isMeta":true,"message":{"role":"user","content":"internal metadata"}}`,
+		`{"type":"user","uuid":"user-2","message":{"role":"user","content":[{"type":"text","text":"second question"}]}}`,
+		`{"type":"assistant","uuid":"assistant-2","message":{"role":"assistant","content":[{"type":"text","text":"second answer"}],"stop_reason":"end_turn"}}`,
+	}
+	if err := os.WriteFile(filepath.Join(transcriptDir, claudeID+".jsonl"), []byte(strings.Join(records, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app := testApp(t, cfg)
+	session := Session{ID: "claude-resume", Agent: "claude", WorkingDir: cfg.DefaultWorkingDir, RunMode: "conversation", SkipPermissions: 1, ClaudeSessionID: claudeID}
+	if err := app.store.createSession(session); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store.setAgentSessionID(session.ID, "claude", claudeID); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := app.conversations.StartSession(session); err != nil {
+			t.Fatal(err)
+		}
+		app.conversations.StopSession(session.ID)
+	}
+	messages, err := app.store.listMessagesByChannel(session.ID, "conversation", 10, 0)
+	if err != nil || len(messages) != 4 {
+		t.Fatalf("messages=%#v err=%v", messages, err)
+	}
+	want := []string{"first question", "working done", "second question", "second answer"}
+	for index := range want {
+		if messages[index].Content != want[index] {
+			t.Fatalf("message %d=%q want %q", index, messages[index].Content, want[index])
+		}
+	}
+	if strings.Contains(strings.Join(want, "\n"), "internal metadata") {
+		t.Fatal("test expectation contains metadata")
+	}
+}
+
+func TestClaudeStartupFailureCleansRunningSession(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Experimental.ConversationMode = true
+	cfg.Claude.Binary = "/bin/false"
+	app := testApp(t, cfg)
+	session := Session{ID: "claude-start-failure", Agent: "claude", WorkingDir: cfg.DefaultWorkingDir, RunMode: "conversation", SkipPermissions: 1}
+	if err := os.MkdirAll(cfg.DefaultWorkingDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.store.createSession(session); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.conversations.StartSession(session); err == nil {
+		t.Fatal("expected Claude startup failure")
+	}
+	if app.conversations.IsRunning(session.ID) {
+		t.Fatal("failed Claude process remained registered")
 	}
 }
 
@@ -253,6 +422,76 @@ func fakeAppServerLauncher(t *testing.T, requestLog string) string {
 	t.Setenv("FAKE_CODEX_REQUEST_LOG", requestLog)
 	t.Setenv("FAKE_CODEX_HELPER", "1")
 	return path
+}
+
+func fakeClaudeStreamLauncher(t *testing.T, requestLog string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fake-claude")
+	script := "#!/bin/sh\nexec \"$FAKE_CLAUDE_TEST_BINARY\" -test.run=TestFakeClaudeStreamProcess -- \"$@\"\n"
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_CLAUDE_TEST_BINARY", os.Args[0])
+	t.Setenv("FAKE_CLAUDE_REQUEST_LOG", requestLog)
+	t.Setenv("FAKE_CLAUDE_HELPER", "1")
+	return path
+}
+
+func TestFakeClaudeStreamProcess(t *testing.T) {
+	if os.Getenv("FAKE_CLAUDE_HELPER") != "1" {
+		return
+	}
+	args := os.Args
+	sessionID := ""
+	for index, arg := range args {
+		if (arg == "--session-id" || arg == "--resume") && index+1 < len(args) {
+			sessionID = args[index+1]
+		}
+	}
+	logFile, err := os.OpenFile(os.Getenv("FAKE_CLAUDE_REQUEST_LOG"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		os.Exit(2)
+	}
+	defer logFile.Close()
+	fakeClaudeEvent(map[string]any{"type": "system", "subtype": "init", "session_id": sessionID})
+	turn := 0
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		line := append([]byte(nil), scanner.Bytes()...)
+		_, _ = logFile.Write(append(line, '\n'))
+		_ = logFile.Sync()
+		var input map[string]any
+		if json.Unmarshal(line, &input) != nil {
+			continue
+		}
+		if stringField(input, "type") == "control_request" {
+			requestID := stringField(input, "request_id")
+			fakeClaudeEvent(map[string]any{"type": "control_response", "response": map[string]any{"subtype": "success", "request_id": requestID}})
+			fakeClaudeEvent(map[string]any{"type": "result", "subtype": "error_during_execution", "is_error": true, "session_id": sessionID})
+			continue
+		}
+		if stringField(input, "type") != "user" {
+			continue
+		}
+		message, _ := input["message"].(map[string]any)
+		prompt, _ := message["content"].(string)
+		turn++
+		fakeClaudeEvent(map[string]any{"type": "user", "session_id": sessionID, "message": map[string]any{"role": "user", "content": prompt}})
+		if os.Getenv("FAKE_CLAUDE_HOLD_TURN") == "1" && turn == 1 {
+			continue
+		}
+		messageID := fmt.Sprintf("claude-message-%d", turn)
+		fakeClaudeEvent(map[string]any{"type": "assistant", "session_id": sessionID, "uuid": messageID, "message": map[string]any{
+			"id": messageID, "role": "assistant", "content": []any{map[string]any{"type": "text", "text": "answer: " + prompt}}, "stop_reason": "end_turn",
+		}})
+		fakeClaudeEvent(map[string]any{"type": "result", "subtype": "success", "is_error": false, "session_id": sessionID})
+	}
+	os.Exit(0)
+}
+
+func fakeClaudeEvent(value any) {
+	encoded, _ := json.Marshal(value)
+	fmt.Println(string(encoded))
 }
 
 func TestFakeCodexAppServerProcess(t *testing.T) {

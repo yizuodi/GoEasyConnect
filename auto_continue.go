@@ -86,7 +86,7 @@ func (m *AutoContinueManager) Check() {
 func (m *AutoContinueManager) checkSession(session Session, now time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if session.Agent != "codex" || session.AutoContinueRemain <= 0 {
+	if !validAgent(session.Agent) || session.AutoContinueRemain <= 0 {
 		return m.app.store.disableAutoContinue(session.ID)
 	}
 	minutes := session.AutoContinueMinutes
@@ -198,6 +198,10 @@ func (m *AutoContinueManager) inspectSession(session Session) (running, busy, kn
 	if terminal == nil {
 		return false, false, true
 	}
+	if session.Agent == "claude" {
+		busy, known = terminal.ClaudeTaskRunning()
+		return true, busy, known
+	}
 	busy, known = terminal.CodexTaskRunning()
 	return true, busy, known
 }
@@ -211,7 +215,7 @@ func (m *AutoContinueManager) sendContinue(session Session) error {
 
 func (m *AutoContinueManager) sendConversationContinue(session Session) error {
 	if m.app.conversations.IsTurnRunning(session.ID) {
-		return errors.New("Codex conversation became busy before auto-continue")
+		return errors.New("conversation became busy before auto-continue")
 	}
 	userID, assistantID := uuid.NewString(), uuid.NewString()
 	if err := m.app.store.createConversationMessage(Message{ID: userID, SessionID: session.ID, Role: "user", Content: autoContinuePrompt, SourceID: userID}); err != nil {
@@ -232,7 +236,7 @@ func (m *AutoContinueManager) sendConversationContinue(session Session) error {
 func (m *AutoContinueManager) sendTerminalContinue(session Session) error {
 	terminal := m.app.sessions.get(session.ID)
 	if terminal == nil {
-		return errors.New("Codex terminal session is not running")
+		return errors.New("terminal session is not running")
 	}
 	userID, assistantID := uuid.NewString(), uuid.NewString()
 	if err := m.app.store.createMessage(Message{ID: userID, SessionID: session.ID, Role: "user", Content: autoContinuePrompt}); err != nil {
@@ -265,6 +269,69 @@ func (t *TerminalSession) CodexTaskRunning() (busy, known bool) {
 		return false, false
 	}
 	return readCodexTaskState(path)
+}
+
+func (t *TerminalSession) ClaudeTaskRunning() (busy, known bool) {
+	t.detectSessionID(false)
+	t.mu.Lock()
+	agent, sessionID := t.agent, t.agentSessionID
+	t.mu.Unlock()
+	if agent != "claude" || sessionID == "" {
+		return false, false
+	}
+	path, err := t.manager.app.findClaudeSessionFile(sessionID)
+	if err != nil {
+		return false, false
+	}
+	return readClaudeTaskState(path)
+}
+
+func readClaudeTaskState(path string) (busy, known bool) {
+	file, err := os.Open(path)
+	if err != nil {
+		return false, false
+	}
+	defer file.Close()
+	if info, err := file.Stat(); err == nil && info.Size() > maxCodexStateTailBytes {
+		_, _ = file.Seek(-maxCodexStateTailBytes, io.SeekEnd)
+		reader := bufio.NewReader(file)
+		_, _ = reader.ReadString('\n')
+		return scanClaudeTaskState(reader)
+	}
+	return scanClaudeTaskState(file)
+}
+
+func scanClaudeTaskState(reader io.Reader) (busy, known bool) {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 64*1024), maxCodexJSONLine)
+	for scanner.Scan() {
+		var record struct {
+			Type        string `json:"type"`
+			IsMeta      bool   `json:"isMeta"`
+			IsSidechain bool   `json:"isSidechain"`
+			Message     struct {
+				Content    any    `json:"content"`
+				StopReason string `json:"stop_reason"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &record) != nil {
+			continue
+		}
+		if record.IsMeta || record.IsSidechain {
+			continue
+		}
+		switch record.Type {
+		case "user":
+			busy, known = true, true
+		case "assistant":
+			if record.Message.StopReason == "end_turn" || record.Message.StopReason == "stop_sequence" || record.Message.StopReason == "max_tokens" || record.Message.StopReason == "refusal" {
+				busy, known = false, true
+			} else {
+				busy, known = true, true
+			}
+		}
+	}
+	return busy, known
 }
 
 func findCodexSessionFile(root, sessionID string) (string, error) {

@@ -82,7 +82,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',Roboto,san
 .conv-msg{max-width:92%;padding:10px 12px;border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45;font-size:14px}
 .conv-msg.user{align-self:flex-end;background:#17506b;color:#fff;border-bottom-right-radius:4px}
 .conv-msg.assistant{align-self:flex-start;background:var(--bg2);border:1px solid var(--border);border-bottom-left-radius:4px}
-.conv-msg.assistant:empty::after{content:'Codex 正在思考…';color:var(--text2)}
+.conv-msg.assistant:empty::after{content:'正在思考…';color:var(--text2)}
 .conv-tool{background:var(--bg2);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text2)}
 .conv-tool summary{padding:9px 10px;cursor:pointer;color:var(--text)}
 .conv-tool pre{padding:0 10px 10px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}
@@ -159,7 +159,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',Roboto,san
         <div class="conv-hint hidden" id="convHint"></div>
         <div class="conv-messages" id="convMessages"></div>
         <div class="conv-compose">
-          <textarea id="convInput" rows="1" placeholder="向 Codex 发送消息；Enter 换行"></textarea>
+          <textarea id="convInput" rows="1" placeholder="发送消息；Enter 换行"></textarea>
           <button class="tbtn danger hidden" id="convStop">停止</button>
           <button class="conv-send" id="convSend">发送</button>
         </div>
@@ -305,7 +305,7 @@ async function goTerm(s){
   $('fab').classList.add('hidden');
   $('tabbar').style.display='none';
   updateTermTitle(s);
-  const enabled=!!appCfg.experimental?.conversationMode&&s.agent==='codex';
+  const enabled=!!appCfg.experimental?.conversationMode;
   $('viewSwitch').classList.toggle('hidden',!enabled);
   sessionView=enabled?(s.running_mode||s.run_mode||'terminal'):'terminal';
   updateSessionURL(s.id,sessionView);
@@ -373,16 +373,16 @@ function updateCtrl(s){
   $('spBtn').title=s.agent==='codex'?'Codex 完全访问模式':'跳过 Claude Code 权限确认';
   const ps=$('profSel');
   if(ps){populateProfSelect(ps,s.agent);ps.classList.toggle('hidden',r);ps.value=s.profile_id||'';updateTermTitle(s);}
-  $('autoBtn').classList.toggle('hidden',s.agent!=='codex');
+  $('autoBtn').classList.toggle('hidden',false);
   $('autoBtn').classList.toggle('on',!!s.auto_continue_enabled);
   $('autoBtn').textContent=s.auto_continue_enabled?'自动继续 '+s.auto_continue_remaining:'自动继续';
   updateConvHint(s);
 }
 
 function showAutoContinueSheet(){
-  const s=sessions.find(x=>x.id===sid);if(!s||s.agent!=='codex')return;
+  const s=sessions.find(x=>x.id===sid);if(!s)return;
   const defaults=appCfg.autoContinueDefaults||{},count=s.auto_continue_enabled?s.auto_continue_total:(s.auto_continue_total||defaults.triggerCount||3),minutes=s.auto_continue_interval_minutes||defaults.intervalMinutes||20;
-  sheet(`<h3>Codex 自动继续</h3><p style="color:var(--text2);font-size:13px;line-height:1.6">服务端按周期检测 Codex 是否已经空闲，空闲时自动发送“继续”。会话停止时暂停。</p><label>触发次数</label><input id="acCount" type="number" min="1" max="1000" value="${count}"><label>检查周期（分钟）</label><input id="acMinutes" type="number" min="1" max="1440" value="${minutes}">${s.auto_continue_enabled?`<small style="display:block;margin-top:12px;color:var(--success)">当前剩余 ${s.auto_continue_remaining}/${s.auto_continue_total} 次</small>`:''}<div class="sheet-btns">${s.auto_continue_enabled?'<button class="btn-cancel" id="acDisable">关闭</button>':'<button class="btn-cancel" id="shCancel">取消</button>'}<button class="btn-ok" id="acEnable">${s.auto_continue_enabled?'重新开启':'开启'}</button></div>`);
+  sheet(`<h3>${s.agent==='codex'?'Codex':'Claude Code'} 自动继续</h3><p style="color:var(--text2);font-size:13px;line-height:1.6">服务端按周期检测会话是否已经空闲，空闲时自动发送“继续”。会话停止时暂停。</p><label>触发次数</label><input id="acCount" type="number" min="1" max="1000" value="${count}"><label>检查周期（分钟）</label><input id="acMinutes" type="number" min="1" max="1440" value="${minutes}">${s.auto_continue_enabled?`<small style="display:block;margin-top:12px;color:var(--success)">当前剩余 ${s.auto_continue_remaining}/${s.auto_continue_total} 次</small>`:''}<div class="sheet-btns">${s.auto_continue_enabled?'<button class="btn-cancel" id="acDisable">关闭</button>':'<button class="btn-cancel" id="shCancel">取消</button>'}<button class="btn-ok" id="acEnable">${s.auto_continue_enabled?'重新开启':'开启'}</button></div>`);
   const cancel=$('shCancel');if(cancel)cancel.addEventListener('click',closeSheet);
   const disable=$('acDisable');if(disable)disable.addEventListener('click',()=>saveAutoContinue(false));
   $('acEnable').addEventListener('click',()=>saveAutoContinue(true));
@@ -440,7 +440,7 @@ async function pollConversation(id,immediate=false){
 }
 function renderConversation(messages){
   const key=messages.map(m=>m.id+':'+m.content).join('|');if(key===convMessageKey)return;convMessageKey=key;convEventKey='';
-  const box=$('convMessages');updateConvDOM(box,()=>{box.querySelectorAll('.conv-msg,.conv-empty').forEach(n=>n.remove());if(!messages.length){const e=document.createElement('div');e.className='conv-empty';e.textContent='Codex 对话模式\n停止会话后可切换到原生终端';box.prepend(e);}else for(const m of messages){const el=document.createElement('div');el.className='conv-msg '+(m.role==='user'?'user':'assistant');el.dataset.messageId=m.id;el.textContent=m.content||'';box.insertBefore(el,box.querySelector('.conv-tool,.conv-error'));}});renderConversationEvents();
+  const box=$('convMessages');updateConvDOM(box,()=>{box.querySelectorAll('.conv-msg,.conv-empty').forEach(n=>n.remove());if(!messages.length){const e=document.createElement('div');e.className='conv-empty';e.textContent='对话模式\n停止会话后可切换到原生终端';box.prepend(e);}else for(const m of messages){const el=document.createElement('div');el.className='conv-msg '+(m.role==='user'?'user':'assistant');el.dataset.messageId=m.id;el.textContent=m.content||'';box.insertBefore(el,box.querySelector('.conv-tool,.conv-error'));}});renderConversationEvents();
 }
 function updateConvDOM(box,update){const previous=box.scrollTop,follow=convAutoScroll;update();box.scrollTop=follow?box.scrollHeight:previous;convLastScrollTop=box.scrollTop;}
 function rememberConvContext(ev){if(!ev.turn_id)return;const messageId=ev.payload?.assistant_message_id||(ev.type==='assistant.message'?ev.payload?.message_id:'');if(!messageId||convTurnMessages.get(ev.turn_id)===messageId)return;convTurnMessages.set(ev.turn_id,messageId);convEventKey='';}
@@ -459,7 +459,7 @@ function convEventBody(p){
 }
 function renderConversationEvents(){
   const visible=convEvents.slice(-50),key=visible.map(ev=>(ev.seq||0)+':'+ev.type+':'+JSON.stringify(ev.payload||{})).join('|');if(key===convEventKey)return;convEventKey=key;
-  const box=$('convMessages');updateConvDOM(box,()=>{box.querySelectorAll('.conv-tool,.conv-error').forEach(n=>n.remove());const messageElements=new Map();box.querySelectorAll('.conv-msg[data-message-id]').forEach(node=>messageElements.set(node.dataset.messageId,node));for(const ev of visible){const p=ev.payload||{},messageId=p.assistant_message_id||convTurnMessages.get(ev.turn_id),anchor=messageElements.get(messageId);if(!anchor)continue;if(ev.type==='turn.failed'){const e=document.createElement('div');e.className='conv-error';e.textContent=p.message||'Codex 执行失败';box.insertBefore(e,anchor);continue;}const d=document.createElement('details');d.className='conv-tool';const title=p.command||p.kind||'文件变更';d.innerHTML='<summary>'+esc(title)+'</summary><pre>'+esc(convEventBody(p))+'</pre>';box.insertBefore(d,anchor);}});
+  const box=$('convMessages');updateConvDOM(box,()=>{box.querySelectorAll('.conv-tool,.conv-error').forEach(n=>n.remove());const messageElements=new Map();box.querySelectorAll('.conv-msg[data-message-id]').forEach(node=>messageElements.set(node.dataset.messageId,node));for(const ev of visible){const p=ev.payload||{},messageId=p.assistant_message_id||convTurnMessages.get(ev.turn_id),anchor=messageElements.get(messageId);if(!anchor)continue;if(ev.type==='turn.failed'){const e=document.createElement('div');e.className='conv-error';e.textContent=p.message||'执行失败';box.insertBefore(e,anchor);continue;}const d=document.createElement('details');d.className='conv-tool';const title=p.command||p.kind||'文件变更';d.innerHTML='<summary>'+esc(title)+'</summary><pre>'+esc(convEventBody(p))+'</pre>';box.insertBefore(d,anchor);}});
 }
 function setConversationBusy(busy){const s=sessions.find(x=>x.id===sid);setConversationState(busy,!!s?.conversation_running);}
 function setConversationState(busy,sessionRunning){$('convSend').classList.toggle('hidden',busy);$('convStop').classList.toggle('hidden',!busy);const s=sessions.find(x=>x.id===sid);if(s){s.turn_running=busy;s.conversation_running=sessionRunning;s.isRunning=!!(s.terminal_running||sessionRunning);if(!s.isRunning)s.running_mode='';$('convInput').disabled=busy||!sessionRunning;$('convSend').disabled=!sessionRunning;updateCtrl(s);renderS();}}
@@ -648,7 +648,7 @@ function newSessionSheet(){
   const defaultDir=appDefaults.workingDir||appCfg.defaultWorkingDir||'/home/user/code';
   sheet(`<h3>新建会话</h3><label>名称</label><input id="sName" placeholder="my-project"><label>智能体</label><select id="sAgent"><option value="claude">Claude Code</option><option value="codex">Codex</option></select><div id="sProfGroup"><label>配置</label><select id="sProf"></select></div><div id="sModeGroup" class="hidden"><label>启动模式</label><select id="sMode"><option value="terminal">原生终端</option><option value="conversation">对话模式</option></select><small>运行中不能切换，需停止后重新选择并启动。</small></div><label>工作目录</label><input id="sDir" value="${escAttr(defaultDir)}" placeholder="/home/user/code"><div class="sheet-btns"><button class="btn-cancel" id="shCancel">取消</button><button class="btn-ok" id="shOk">创建</button></div>`);
   $('sAgent').value=appCfg.defaultAgent||'claude';
-  const syncAgent=()=>{const agent=$('sAgent').value;populateProfSelect($('sProf'),agent);$('sModeGroup').classList.toggle('hidden',agent!=='codex'||!appCfg.experimental?.conversationMode);if(agent!=='codex')$('sMode').value='terminal';};
+  const syncAgent=()=>{const agent=$('sAgent').value;populateProfSelect($('sProf'),agent);$('sModeGroup').classList.toggle('hidden',!appCfg.experimental?.conversationMode);};
   $('sAgent').addEventListener('change',syncAgent);syncAgent();
   $('shCancel').addEventListener('click',closeSheet);
   $('shOk').addEventListener('click',createSession);
@@ -657,7 +657,7 @@ async function createSession(){
   const name=$('sName').value.trim();if(!name)return alert('请输入名称');
   const profile_id=$('sProf').value||null;
   const agent=$('sAgent').value;
-  const run_mode=agent==='codex'&&appCfg.experimental?.conversationMode?$('sMode').value:'terminal';
+  const run_mode=appCfg.experimental?.conversationMode?$('sMode').value:'terminal';
   const working_dir=$('sDir').value.trim()||appDefaults.workingDir||appCfg.defaultWorkingDir||'/home/user/code';
   const r=await api('/api/sessions',{method:'POST',body:JSON.stringify({name,agent,profile_id,working_dir,run_mode})});
   if(!r.ok){const e=await r.json();return alert(e.error||'失败');}
