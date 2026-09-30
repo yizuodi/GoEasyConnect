@@ -343,6 +343,9 @@ write_new_config() {
     "defaultAgent": "${default_agent}",
     "defaultWorkingDir": "${escaped_working_directory}"
   },
+  "updates": {
+    "enabled": true
+  },
   "logging": {
     "path": "error.log",
     "maxSizeMB": 10
