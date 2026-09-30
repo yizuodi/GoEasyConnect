@@ -44,6 +44,7 @@ for architecture in $architectures; do
   cp "$repo_dir/README.md" "$stage/"
   cp "$repo_dir/LICENSE" "$stage/"
   cp "$repo_dir/THIRD_PARTY_NOTICES.md" "$stage/"
+  cp "$repo_dir/scripts/update-helper.sh" "$stage/"
   tar -C "$stage" -czf "$output_dir/$archive" .
   archives="$archives $archive"
 done

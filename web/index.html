@@ -26,7 +26,10 @@
     <aside class="sidebar" id="sidebar" aria-label="主导航">
       <div class="sidebar-header">
         <h2>🔗 EasyConnect</h2>
-        <a href="/mobile" class="version-link" title="移动版">📱</a>
+        <div class="sidebar-header-actions">
+          <button type="button" class="version-link update-link" id="updateBtn" onclick="checkForUpdates()" title="检查更新">↻</button>
+          <a href="/mobile" class="version-link" title="移动版">📱</a>
+        </div>
       </div>
       <div class="sidebar-tabs">
         <div class="sidebar-tab active" onclick="switchTab('sessions')" id="tabSessions">会话</div>

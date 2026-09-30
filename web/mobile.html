@@ -137,7 +137,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',Roboto,san
   <!-- App -->
   <div id="app" class="app hidden">
     <div id="pgSessions" class="page active">
-      <div class="page-hd" style="display:flex;align-items:center;justify-content:space-between"><h2>会话</h2><a href="/" style="color:var(--text2);text-decoration:none;font-size:13px">💻 电脑版</a></div>
+      <div class="page-hd" style="display:flex;align-items:center;justify-content:space-between"><h2>会话</h2><div style="display:flex;gap:12px;align-items:center"><button id="updateBtn" class="tbtn" style="padding:4px 8px">↻ 更新</button><a href="/" style="color:var(--text2);text-decoration:none;font-size:13px">💻 电脑版</a></div></div>
       <div class="slist" id="sessionList"></div>
     </div>
     <div id="pgTerm" class="page">
@@ -216,6 +216,7 @@ let convTurnMessages=new Map();
 $('loginBtn').addEventListener('click',doLogin);
 $('pw').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
 $('fab').addEventListener('click',onFab);
+$('updateBtn').addEventListener('click',checkForUpdates);
 $('btnBack').addEventListener('click',goSessions);
 $('btnStart').addEventListener('click',doStart);
 $('btnStop').addEventListener('click',doStop);
@@ -248,6 +249,23 @@ async function api(path,opts={}){
   const h={'Authorization':'Bearer '+token};
   if(opts.body)h['Content-Type']='application/json';
   return fetch(path,{...opts,headers:h});
+}
+async function checkForUpdates(){
+  const button=$('updateBtn');
+  if(button){button.disabled=true;button.textContent='…';}
+  try{
+    const response=await api('/api/update');
+    const status=await response.json();
+    if(!response.ok)return alert(status.error||'检查更新失败');
+    if(!status.enabled)return alert('当前版本未启用网页更新。');
+    if(!status.updateAvailable)return alert('当前已经是最新版本 '+status.currentVersion+'。');
+    if(!confirm('发现新版本 '+status.latestVersion+'（当前 '+status.currentVersion+'）。更新会自动备份并重启 EasyConnect，现在更新吗？'))return;
+    const start=await api('/api/update',{method:'POST',body:'{}'});
+    const result=await start.json();
+    if(!start.ok)return alert(result.error||'启动更新失败');
+    alert('更新已开始，页面可能会短暂断开。');
+  }catch(error){alert('检查更新失败: '+(error.message||error));}
+  finally{if(button){button.disabled=false;button.textContent='↻ 更新';}}
 }
 async function checkAuth(){
   try{const r=await api('/api/sessions');if(r.ok)enterApp();else{token='';localStorage.removeItem('ec_token');}}

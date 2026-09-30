@@ -138,6 +138,24 @@ body {
   gap: 8px;
 }
 
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.update-link {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px;
+}
+
+.update-link:disabled {
+  opacity: .5;
+  cursor: wait;
+}
+
 .sidebar-tabs {
   display: flex;
   border-bottom: 1px solid var(--border);

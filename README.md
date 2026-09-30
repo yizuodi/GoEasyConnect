@@ -22,6 +22,7 @@ GoEasyConnect 是一个面向小型、自托管、单机环境的 Claude Code �
 - SQLite WAL、`0600` 敏感文件权限和有大小上限的 `error.log`
 - 有界终端、轮询和 WebSocket 缓冲，适合资源有限的单机环境
 - Claude Code/Codex 自动继续：按周期检测任务是否结束，空闲时限次发送“继续”
+- 桌面端和移动端可检查 GitHub 最新 Release，并通过受限更新服务一键升级
 
 ## 系统要求
 
@@ -58,6 +59,16 @@ Release，然后停止服务并将原二进制、配置、systemd unit 及 SQLit
 `/var/backups/easyconnect/`。新版本会先执行配置和数据库检查；检查失败或原先处于
 运行状态的服务无法重新启动时，升级器自动恢复原二进制和数据库。原服务升级前
 未运行时，升级完成后仍保持未运行。自定义 unit 中的 `ExecStart` 路径不能包含空格。
+
+网页一键更新支持由安装脚本安装的实例；手工复制二进制并使用示例 systemd unit
+时不会自动安装 root 更新助手，应继续使用本节的命令行升级方式。
+
+通过安装脚本安装或升级后，页面顶部的“更新”按钮也可以检查和安装最新正式
+Release。网页进程不会直接取得 root shell；它只能启动固定的
+`goeasyconnect-updater.service`。更新器仅从本项目 GitHub Release 下载当前架构的
+包，校验 `checksums.txt`，备份二进制、配置与 SQLite 文件，并在检查或启动失败时
+自动回滚。更新过程中页面会短暂断开。可在 `config.json` 中设置
+`"updates": {"enabled": false}` 关闭网页更新入口。
 
 ## 构建与运行
 

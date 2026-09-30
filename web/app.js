@@ -98,6 +98,34 @@ function showApp() {
   bindConversationScrollBehavior();
 }
 
+async function checkForUpdates() {
+  const button = document.getElementById('updateBtn');
+  if (button) { button.disabled = true; button.textContent = '…'; }
+  try {
+    const response = await api('/api/update');
+    const status = await response.json();
+    if (!response.ok) {
+      return alert(status.error || '检查更新失败');
+    }
+    if (!status.enabled) {
+      return alert(`当前版本 ${status.currentVersion} 未启用网页更新。`);
+    }
+    if (!status.updateAvailable) {
+      return alert(`当前已经是最新版本 ${status.currentVersion}。`);
+    }
+    const release = status.releaseName ? `\n${status.releaseName}` : '';
+    if (!confirm(`发现新版本 ${status.latestVersion}（当前 ${status.currentVersion}）${release}\n\n更新会自动备份配置和数据库，并重启 EasyConnect。现在更新吗？`)) return;
+    const start = await api('/api/update', { method: 'POST', body: '{}' });
+    const result = await start.json();
+    if (!start.ok) return alert(result.error || '启动更新失败');
+    alert('更新已开始。EasyConnect 将在完成后自动重启，页面可能会短暂断开。');
+  } catch (error) {
+    alert(`检查更新失败: ${error.message || error}`);
+  } finally {
+    if (button) { button.disabled = false; button.textContent = '↻'; }
+  }
+}
+
 // ============ View Controls ============
 function fitTerminal() {
   try {

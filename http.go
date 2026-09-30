@@ -26,6 +26,8 @@ func (a *App) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/config", a.handlePublicConfig)
 	mux.Handle("GET /api/app-config", a.requireAuth(http.HandlerFunc(a.handleAppConfig)))
+	mux.Handle("GET /api/update", a.requireAuth(http.HandlerFunc(a.handleUpdateStatus)))
+	mux.Handle("POST /api/update", a.requireAuth(http.HandlerFunc(a.handleUpdateStart)))
 	mux.Handle("GET /api/defaults", a.requireAuth(http.HandlerFunc(a.handleDefaults)))
 	mux.Handle("GET /api/profiles", a.requireAuth(http.HandlerFunc(a.handleListProfiles)))
 	mux.Handle("POST /api/profiles", a.requireAuth(http.HandlerFunc(a.handleCreateProfile)))
@@ -122,6 +124,7 @@ func (a *App) handlePublicConfig(w http.ResponseWriter, _ *http.Request) {
 func (a *App) handleAppConfig(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"branding": a.cfg.Branding, "pollIntervalMs": a.cfg.Session.PollIntervalMS,
+		"version": version, "updatesEnabled": a.cfg.Updates.Enabled,
 		"defaultWorkingDir": a.cfg.DefaultWorkingDir, "defaultAgent": a.cfg.Session.DefaultAgent,
 		"agents": map[string]string{"claude": "Claude Code", "codex": "Codex"}, "fileBrowserUrl": a.cfg.FileBrowser.URL,
 		"experimental":         map[string]bool{"conversationMode": a.cfg.Experimental.ConversationMode},

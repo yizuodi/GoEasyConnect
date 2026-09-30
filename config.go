@@ -28,6 +28,7 @@ type Config struct {
 	FileBrowser  FileBrowserConfig  `json:"fileBrowser"`
 	Logging      LoggingConfig      `json:"logging"`
 	Experimental ExperimentalConfig `json:"experimental"`
+	Updates      UpdateConfig       `json:"updates"`
 
 	BaseDir           string `json:"-"`
 	ConfigPath        string `json:"-"`
@@ -99,6 +100,10 @@ type ExperimentalConfig struct {
 	ConversationMode bool `json:"conversationMode"`
 }
 
+type UpdateConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 func loadConfig(configPath string) (*Config, error) {
 	absPath, err := filepath.Abs(configPath)
 	if err != nil {
@@ -117,6 +122,15 @@ func loadConfig(configPath string) (*Config, error) {
 	var cfg Config
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	var sections map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &sections); err == nil {
+		if _, configured := sections["updates"]; !configured {
+			// Existing installations predate the updater setting. Enable the
+			// feature by default after the binary is upgraded; an explicit
+			// "enabled": false remains respected.
+			cfg.Updates.Enabled = true
+		}
 	}
 	cfg.ConfigPath = absPath
 	cfg.BaseDir = filepath.Dir(absPath)

@@ -75,6 +75,10 @@ run_upgrade_case() (
   printf '%s\n' '{"auth":{"password":"test"}}' >"${config_path}"
   printf '%s\n' '[Service]' >"${unit_file}"
   write_binary "${installed_binary}" v0.3.1 pass
+  mkdir -p "${case_root}/libexec" "${case_root}/systemd" "${case_root}/sudoers"
+  update_helper_path="${case_root}/libexec/updater"
+  update_unit_name="updater.service"
+  update_sudoers_path="${case_root}/sudoers/updater"
 
   require_root() { :; }
   require_debian() { :; }
@@ -84,6 +88,8 @@ run_upgrade_case() (
     release_version=v0.3.2
     mkdir -p "${temporary_dir}/package"
     write_binary "${temporary_dir}/package/easyconnect" v0.3.2 "${check_result}"
+    printf '#!/bin/sh\n' >"${temporary_dir}/package/update-helper.sh"
+    chmod 0755 "${temporary_dir}/package/update-helper.sh"
   }
   systemctl() {
     printf '%s\n' "$*" >>"${systemctl_log}"
@@ -122,6 +128,7 @@ run_upgrade_case() (
     command install "${arguments[@]}"
   }
   chown() { :; }
+  install_update_support() { :; }
 
   set +e
   (upgrade_main)

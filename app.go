@@ -22,6 +22,8 @@ type App struct {
 	wsClients     map[*wsClient]struct{}
 	wsTicketMu    sync.Mutex
 	wsTickets     map[string]time.Time
+	updateMu      sync.Mutex
+	updateRunning bool
 }
 
 func newApp(cfg *Config, logger *log.Logger) (*App, error) {

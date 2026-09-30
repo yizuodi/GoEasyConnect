@@ -50,6 +50,37 @@ func TestLoadConfigRejectsUnsafePassword(t *testing.T) {
 	}
 }
 
+func TestLoadConfigUpdateDefaults(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name    string
+		updates string
+		enabled bool
+	}{
+		{name: "missing", updates: "", enabled: true},
+		{name: "enabled", updates: `,"updates":{"enabled":true}`, enabled: true},
+		{name: "disabled", updates: `,"updates":{"enabled":false}`, enabled: false},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			configPath := filepath.Join(root, "config.json")
+			content := []byte(`{"auth":{"password":"test-password"}` + test.updates + `}`)
+			if err := os.WriteFile(configPath, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			config, err := loadConfig(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if config.Updates.Enabled != test.enabled {
+				t.Fatalf("updates enabled=%v, want %v", config.Updates.Enabled, test.enabled)
+			}
+		})
+	}
+}
+
 func TestServiceUserHomeWithoutHOME(t *testing.T) {
 	t.Setenv("HOME", "")
 	home, err := serviceUserHome()

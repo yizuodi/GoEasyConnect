@@ -55,6 +55,9 @@
   "experimental": {
     "conversationMode": false
   },
+  "updates": {
+    "enabled": true
+  },
   "logging": {
     "path": "./error.log",
     "maxSizeMB": 10

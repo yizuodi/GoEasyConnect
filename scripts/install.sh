@@ -8,6 +8,9 @@ service_name="easyconnect"
 default_install_dir="/srv/GoEasyConnect"
 default_port="26890"
 backup_root="/var/backups/easyconnect"
+update_helper_path="/usr/local/libexec/goeasyconnect-updater"
+update_unit_name="goeasyconnect-updater.service"
+update_sudoers_path="/etc/sudoers.d/goeasyconnect-updater"
 
 die() {
   printf 'Error: %s\n' "$*" >&2
@@ -351,7 +354,11 @@ JSON
 write_systemd_unit() {
   local unit_file="$1"
   local writable_paths="${install_dir}"
-  local no_new_privileges="true"
+  # The web updater is a narrowly scoped sudoers rule which starts only the
+  # fixed root-owned updater unit. NoNewPrivileges would prevent that rule
+  # from working, while the service account still receives no general sudo
+  # access unless the separate AI-session option is enabled below.
+  local no_new_privileges="false"
   local protect_system="strict"
   local protect_home="read-only"
 
@@ -390,6 +397,36 @@ ReadWritePaths=${writable_paths}
 [Install]
 WantedBy=multi-user.target
 UNIT
+}
+
+write_update_unit() {
+  local unit_file="$1"
+
+  cat >"${unit_file}" <<UNIT
+[Unit]
+Description=GoEasyConnect web-triggered updater
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${update_helper_path}
+UMask=0077
+UNIT
+}
+
+install_update_support() {
+  local package_helper="$1"
+  local temporary_unit="$2"
+
+  [[ -f "${package_helper}" && -x "${package_helper}" ]] || die "release package does not contain the updater helper"
+  install_sudo_if_needed
+  install -d -o root -g root -m 0755 "$(dirname "${update_helper_path}")"
+  install -o root -g root -m 0755 "${package_helper}" "${update_helper_path}"
+  write_update_unit "${temporary_unit}"
+  install -o root -g root -m 0644 "${temporary_unit}" "/etc/systemd/system/${update_unit_name}"
+  printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl start --no-block %s\n' "${service_user}" "${update_unit_name}" >"${temporary_unit}.sudoers"
+  install -o root -g root -m 0440 "${temporary_unit}.sudoers" "${update_sudoers_path}"
 }
 
 backup_existing_file() {
@@ -636,6 +673,9 @@ upgrade_main() {
   mv -f "${installed_binary}.new" "${installed_binary}" \
     || rollback_upgrade "cannot replace the installed binary"
 
+  install_update_support "${temporary_dir}/package/update-helper.sh" "${temporary_dir}/goeasyconnect-updater.service"
+  systemctl daemon-reload
+
   if ! runuser -u "${service_user}" -- env HOME="${service_home}" \
     "${installed_binary}" --check --config "${config_path}"; then
     rollback_upgrade "configuration or database validation failed"
@@ -752,6 +792,7 @@ install_main() {
   install -o root -g root -m 0755 "${temporary_dir}/package/easyconnect" "${install_dir}/easyconnect.new"
   mv -f "${install_dir}/easyconnect.new" "${install_dir}/easyconnect"
   install -o root -g root -m 0644 "${temporary_dir}/package/config.example.json" "${install_dir}/config.example.json"
+  install_update_support "${temporary_dir}/package/update-helper.sh" "${temporary_dir}/goeasyconnect-updater.service"
 
   if [[ "${reuse_config}" == "yes" ]]; then
     info "Preserving existing ${install_dir}/config.json."
