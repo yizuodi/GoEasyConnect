@@ -30,6 +30,8 @@ document.addEventListener('visibilitychange', () => {
 let usePolling = localStorage.getItem('ec_polling') === 'true';
 let pollSeq = 0;
 let pollTimer = null;
+let terminalPollGeneration = 0;
+const terminalHistoryLoader = new TerminalHistoryLoader(api);
 let POLL_INTERVAL = 300; // will be overridden by server config
 
 // ============ Init ============
@@ -622,12 +624,12 @@ async function switchSessionMode(mode, remember = true) {
     return;
   }
   initTerminal();
-  const response = await api(`/api/sessions/${currentSessionId}/messages`);
-  const messages = response.ok ? await response.json() : [];
-  messages.forEach(message => {
-    if (message.role === 'user') term.write('\x1b[1;36m> ' + message.content + '\x1b[0m\r\n');
-    else if (message.content) term.write(message.content);
-  });
+  const terminalSessionId = currentSessionId;
+  const currentTerminal = term;
+  if (!s.terminal_running) {
+    await terminalHistoryLoader.load(terminalSessionId, currentTerminal, () => currentSessionId === terminalSessionId && term === currentTerminal && sessionMode === 'terminal');
+  }
+  if (currentSessionId !== terminalSessionId || term !== currentTerminal || sessionMode !== 'terminal') return;
   if (s.isRunning && (s.running_mode || s.run_mode) === 'terminal') {
     if (usePolling) startPolling(currentSessionId);
     else connectWS(currentSessionId);
@@ -1150,7 +1152,9 @@ async function connectWS(sessionId) {
   socket.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
+      if (generation !== wsConnectGeneration || currentSessionId !== sessionId || sessionMode !== 'terminal') return;
       if (msg.type === 'output' && term) {
+        if (msg.snapshot) term.reset();
         term.write(msg.data);
       } else if (msg.type === 'exit' && term) {
         handleExit(msg.exitCode);
@@ -1168,6 +1172,7 @@ function disconnectWS() {
 
 // ============ HTTP Polling ============
 function startPolling(sessionId) {
+  stopPolling();
   disconnectWS();
   pollSeq = 0;
   doPoll(sessionId);
@@ -1177,10 +1182,13 @@ function doPoll(sessionId) {
   if (pollTimer) clearTimeout(pollTimer);
   if (!currentSessionId || currentSessionId !== sessionId || !usePolling) return;
 
+  const generation = terminalPollGeneration;
   api(`/api/sessions/${sessionId}/output?seq=${pollSeq}`)
     .then(r => r.json())
     .then(data => {
+      if (generation !== terminalPollGeneration || currentSessionId !== sessionId || sessionMode !== 'terminal') return;
       if (data.output && term) {
+        if (data.snapshot) term.reset();
         term.write(data.output);
       }
       if (data.running) {
@@ -1191,16 +1199,19 @@ function doPoll(sessionId) {
       }
     })
     .catch(() => {
+      if (generation !== terminalPollGeneration || currentSessionId !== sessionId || sessionMode !== 'terminal') return;
       // On error, retry after longer interval
       pollTimer = setTimeout(() => doPoll(sessionId), 2000);
     });
 }
 
 function stopPolling() {
+  terminalPollGeneration++;
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
 }
 
 function disconnectAll() {
+  terminalHistoryLoader.close();
   disconnectWS();
   stopPolling();
 }

@@ -7,6 +7,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
   <title>EasyConnect</title>
+  <link rel="stylesheet" href="/terminal-history.css">
   <style>
 :root{--bg:#0f0f1a;--bg2:#1a1a2e;--bg3:#16213e;--text:#e0e0e0;--text2:#a0a0a0;--muted:#555;--accent:#4fc3f7;--accent2:#29b6f6;--border:#2a2a4a;--success:#66bb6a;--danger:#ef5350;--radius:10px;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px)}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -171,6 +172,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',Roboto,san
         <button class="tbtn" id="spBtn">Skip</button>
         <button class="tbtn hidden" id="autoBtn">自动继续</button>
         <button class="tbtn" id="fbBtn">文件</button>
+        <button class="tbtn" id="historyBtn">历史</button>
       </div>
     </div>
     <div id="pgProfiles" class="page">
@@ -201,6 +203,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',Roboto,san
   <script src="/xterm-addon-fit.js"></script>
   <script src="/conversation-feed.js"></script>
   <script src="/update-client.js"></script>
+  <script src="/terminal-history.js"></script>
   <script>
 const $=s=>document.getElementById(s);
 
@@ -210,6 +213,8 @@ let sid=null,sessions=[],profiles=[];
 let ws=null,wsConnectGeneration=0,term=null,fit=null;
 let usePolling=localStorage.getItem('ec_polling')==='true';
 let pollSeq=0,pollTimer=null,POLL_MS=300;
+let terminalPollGeneration=0;
+const terminalHistoryLoader=new TerminalHistoryLoader(api);
 let curPage='sessions',appCfg={},appDefaults={};
 let sessionView='terminal',convTimer=null,convEvents=[];
 let convAutoScroll=true,convLastScrollTop=0;
@@ -232,6 +237,7 @@ $('autoBtn').addEventListener('click',showAutoContinueSheet);
 $('profSel').addEventListener('change',changeProfile);
 $('fbBtn').addEventListener('click',openFB);
 $('wsBtn').addEventListener('click',toggleWS);
+$('historyBtn').addEventListener('click',()=>{if(sid)openTerminalHistory(api,sid);});
 $('fsBtn').addEventListener('click',toggleFullscreen);
 $('chatViewBtn').addEventListener('click',()=>switchSessionView('conversation'));
 $('termViewBtn').addEventListener('click',()=>switchSessionView('terminal'));
@@ -342,7 +348,7 @@ async function goTerm(s){
   updateWsBtn();
   disconnectAll();stopConversationPoll();
   if(sessionView==='conversation')await openConversation(s);
-  else{showTerminalView();initTerm();await loadHistory(s.id);}
+  else{showTerminalView();initTerm();if(!s.terminal_running)await loadHistory(s.id);}
   if(sid!==s.id||curPage!=='terminal')return;
   if(sessionView==='terminal'&&s.terminal_running){if(usePolling)startPoll(s.id);else connectWS(s.id);}
   fitTerminalView();
@@ -444,7 +450,7 @@ async function switchSessionView(view){
   updateSessionURL(sid,view);
   disconnectAll();stopConversationPoll();updateCtrl(s);
   if(view==='conversation')await openConversation(s);
-  else{showTerminalView();initTerm();await loadHistory(s.id);if(s.terminal_running){if(usePolling)startPoll(s.id);else connectWS(s.id);}fitTerminalView();}
+  else{showTerminalView();initTerm();if(!s.terminal_running)await loadHistory(s.id);if(sid!==s.id||sessionView!=='terminal')return;if(s.terminal_running){if(usePolling)startPoll(s.id);else connectWS(s.id);}fitTerminalView();}
 }
 function showTerminalView(){
   $('termBox').classList.remove('hidden');$('convView').classList.add('hidden');$('termFooter').classList.remove('hidden');
@@ -611,13 +617,8 @@ function initTerm(){
 
 function fitTerminalView(){try{if(fit)fit.fit();}catch{}}
 async function loadHistory(id){
-  const r=await api('/api/sessions/'+id+'/messages');
-  if(!r.ok)return;
-  const messages=await r.json();
-  messages.forEach(m=>{
-    if(m.role==='user')term?.write('\x1b[1;36m> '+m.content+'\x1b[0m\r\n');
-    else if(m.content)term?.write(m.content);
-  });
+  const currentTerm=term;
+  await terminalHistoryLoader.load(id,currentTerm,()=>sid===id&&term===currentTerm&&sessionView==='terminal'&&curPage==='terminal');
 }
 function sendInput(d){
   if(!sid)return;
@@ -643,24 +644,26 @@ async function connectWS(id){
   const socket=new WebSocket(p+'//'+location.host+'/ws?ticket='+encodeURIComponent(data.ticket));
   ws=socket;
   socket.onopen=()=>{if(generation!==wsConnectGeneration)return socket.close();socket.send(JSON.stringify({type:'subscribe',sessionId:id}));};
-  socket.onmessage=e=>{try{const m=JSON.parse(e.data);if(m.type==='output'&&term)term.write(m.data);else if(m.type==='exit')handleExit(m.exitCode);}catch{}};
+  socket.onmessage=e=>{try{if(generation!==wsConnectGeneration||sid!==id||sessionView!=='terminal')return;const m=JSON.parse(e.data);if(m.type==='output'&&term){if(m.snapshot)term.reset();term.write(m.data);}else if(m.type==='exit')handleExit(m.exitCode);}catch{}};
   socket.onclose=()=>{if(ws===socket)ws=null;};
 }
 function disconnectWS(){wsConnectGeneration++;if(ws){ws.close();ws=null;}}
 
 // ============ Polling ============
-function startPoll(id){disconnectWS();pollSeq=0;doPoll(id);}
+function startPoll(id){stopPoll();disconnectWS();pollSeq=0;doPoll(id);}
 function doPoll(id){
   if(pollTimer)clearTimeout(pollTimer);
   if(!sid||sid!==id||!usePolling)return;
+  const generation=terminalPollGeneration;
   api('/api/sessions/'+id+'/output?seq='+pollSeq).then(r=>r.json()).then(d=>{
-    if(d.output&&term)term.write(d.output);
+    if(generation!==terminalPollGeneration||sid!==id||sessionView!=='terminal')return;
+    if(d.output&&term){if(d.snapshot)term.reset();term.write(d.output);}
     if(d.running){pollSeq=d.seq;pollTimer=setTimeout(()=>doPoll(id),POLL_MS);}
     else handleExit(0);
-  }).catch(()=>{pollTimer=setTimeout(()=>doPoll(id),2000);});
+  }).catch(()=>{if(generation===terminalPollGeneration&&sid===id&&sessionView==='terminal')pollTimer=setTimeout(()=>doPoll(id),2000);});
 }
-function stopPoll(){if(pollTimer){clearTimeout(pollTimer);pollTimer=null;}}
-function disconnectAll(){disconnectWS();stopPoll();}
+function stopPoll(){terminalPollGeneration++;if(pollTimer){clearTimeout(pollTimer);pollTimer=null;}}
+function disconnectAll(){terminalHistoryLoader.close();disconnectWS();stopPoll();}
 function handleExit(code){
   if(term)term.write('\r\n\x1b[33m[进程退出, code='+(code||0)+']\x1b[0m\r\n');
   const s=sessions.find(x=>x.id===sid);

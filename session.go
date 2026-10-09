@@ -266,7 +266,6 @@ func (t *TerminalSession) readLoop() {
 
 func (t *TerminalSession) consumeOutput(data []byte) {
 	copyData := append([]byte(nil), data...)
-	var clients []*wsClient
 	var assistantID string
 	var messageContent []byte
 	var shouldSave bool
@@ -316,8 +315,11 @@ func (t *TerminalSession) consumeOutput(data []byte) {
 			}
 		}
 	}
+	// Queue live output under the same lock as subscription snapshots so a new
+	// subscriber cannot receive a snapshot followed by an already included delta.
+	payload, _ := json.Marshal(map[string]any{"type": "output", "data": string(copyData)})
 	for client := range t.clients {
-		clients = append(clients, client)
+		client.enqueue(payload)
 	}
 	t.mu.Unlock()
 	if scheduleSave > 0 {
@@ -340,10 +342,6 @@ func (t *TerminalSession) consumeOutput(data []byte) {
 		time.AfterFunc(300*time.Millisecond, func() { _, _ = t.Write([]byte("\r")) })
 	}
 	t.detectSessionID(false)
-	payload, _ := json.Marshal(map[string]any{"type": "output", "data": string(copyData)})
-	for _, client := range clients {
-		client.enqueue(payload)
-	}
 }
 
 func codexNeedsStartupConfirmation(text string) bool {
@@ -557,18 +555,21 @@ func (t *TerminalSession) OutputSnapshot() []byte {
 func (t *TerminalSession) Poll(after int64) ([]byte, int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if after == 0 {
+		return terminalTail(t.output.data, terminalPreviewBytes, false), t.poll.seq
+	}
 	return t.poll.Since(after)
 }
 
 func (t *TerminalSession) addClient(client *wsClient) {
 	t.mu.Lock()
 	t.clients[client] = struct{}{}
-	snapshot := t.output.Bytes()
-	t.mu.Unlock()
+	snapshot := terminalTail(t.output.data, terminalPreviewBytes, false)
 	if len(snapshot) > 0 {
-		payload, _ := json.Marshal(map[string]any{"type": "output", "data": string(snapshot)})
+		payload, _ := json.Marshal(map[string]any{"type": "output", "data": string(snapshot), "snapshot": true})
 		client.enqueue(payload)
 	}
+	t.mu.Unlock()
 }
 
 func (t *TerminalSession) removeClient(client *wsClient) {

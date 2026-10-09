@@ -45,6 +45,7 @@ func (a *App) routes() http.Handler {
 	mux.Handle("PATCH /api/sessions/{id}/mode", a.requireAuth(http.HandlerFunc(a.handleSessionMode)))
 	mux.Handle("PUT /api/sessions/{id}/auto-continue", a.requireAuth(http.HandlerFunc(a.handleAutoContinue)))
 	mux.Handle("GET /api/sessions/{id}/messages", a.requireAuth(http.HandlerFunc(a.handleListMessages)))
+	mux.Handle("GET /api/sessions/{id}/terminal/history", a.requireAuth(http.HandlerFunc(a.handleTerminalHistory)))
 	mux.Handle("POST /api/sessions/{id}/messages", a.requireAuth(http.HandlerFunc(a.handleCreateMessage)))
 	mux.Handle("GET /api/sessions/{id}/conversation/messages", a.requireAuth(http.HandlerFunc(a.handleListConversationMessages)))
 	mux.Handle("POST /api/sessions/{id}/conversation/messages", a.requireAuth(http.HandlerFunc(a.handleCreateConversationMessage)))
@@ -103,6 +104,8 @@ func (a *App) handleAsset(w http.ResponseWriter, r *http.Request) {
 		"xterm.js": true, "xterm.css": true, "xterm-addon-fit.js": true,
 		"conversation-feed.js": true,
 		"update-client.js":     true,
+		"terminal-history.js":  true,
+		"terminal-history.css": true,
 	}
 	if !allowed[asset] {
 		http.NotFound(w, r)

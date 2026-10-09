@@ -128,6 +128,9 @@ CREATE INDEX IF NOT EXISTS idx_conversation_events_session_seq ON conversation_e
 	if err := s.initializeConversationFeed(); err != nil {
 		return err
 	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_terminal_history ON messages(session_id) WHERE COALESCE(channel,'terminal')='terminal'`); err != nil {
+		return fmt.Errorf("create terminal history index: %w", err)
+	}
 	if _, err := s.db.Exec(`UPDATE sessions SET status='stopped',auto_continue_next_at=''`); err != nil {
 		return fmt.Errorf("reset stale session status: %w", err)
 	}

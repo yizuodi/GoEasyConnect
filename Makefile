@@ -13,6 +13,7 @@ test:
 	bash scripts/install_test.sh
 	node --test scripts/conversation_feed_test.cjs
 	node --test scripts/update_helper_test.cjs scripts/update_client_test.cjs
+	node --test scripts/terminal_history_test.cjs
 
 vet:
 	CGO_ENABLED=0 go vet ./...

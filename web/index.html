@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>EasyConnect</title>
   <link rel="stylesheet" href="/style.css?v=1790733600">
+  <link rel="stylesheet" href="/terminal-history.css">
   <link rel="preload" href="/xterm.css?v=1778644800" as="style" onload="this.rel='stylesheet'">
   <noscript><link rel="stylesheet" href="/xterm.css?v=1778644800"></noscript>
 </head>
@@ -72,6 +73,7 @@
                 <button class="btn btn-sm btn-ghost hidden" id="autoContinueBtn" onclick="showAutoContinueModal()" title="配置自动继续"><span aria-hidden="true">⏱</span><span class="auto-continue-label">自动继续</span></button>
                 <button class="btn btn-sm btn-ghost" id="pollToggle" onclick="togglePolling()" title="切换连接模式">🔌 WebSocket</button>
                 <button class="btn btn-sm btn-ghost" id="btnFiles" onclick="openFileBrowser()" title="在文件管理器中打开工作目录">📁 文件</button>
+                <button class="btn btn-sm btn-ghost" onclick="openTerminalHistory(api, currentSessionId)">终端历史</button>
               </div>
             </div>
             <span id="sessionStatus" style="font-size:12px;color:var(--text-secondary)"></span>
@@ -152,6 +154,7 @@
   <script src="/xterm-addon-fit.js?v=1778644800" async></script>
   <script src="/conversation-feed.js"></script>
   <script src="/update-client.js"></script>
+  <script src="/terminal-history.js"></script>
   <script src="/app.js?v=1790733600" async></script>
 </body>
 </html>

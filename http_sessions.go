@@ -550,7 +550,7 @@ func (a *App) handlePollOutput(w http.ResponseWriter, r *http.Request) {
 	}
 	after, _ := strconv.ParseInt(r.URL.Query().Get("seq"), 10, 64)
 	output, seq := terminal.Poll(after)
-	writeJSON(w, http.StatusOK, map[string]any{"output": string(output), "seq": seq, "running": true})
+	a.writeFeedJSON(w, r, map[string]any{"output": string(output), "seq": seq, "running": true, "snapshot": after == 0})
 }
 
 func (a *App) handleTerminalInput(w http.ResponseWriter, r *http.Request) {
