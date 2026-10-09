@@ -27,7 +27,7 @@ GoEasyConnect 是一个面向小型、自托管、单机环境的 Claude Code �
 ## 系统要求
 
 - Linux（PTY 和进程组管理依赖 Linux/Unix 行为）
-- Go 1.25 或更新版本（仅源码构建时需要）
+- Go 1.26 或更新版本（仅源码构建时需要，与 `go.mod` 一致）
 - 已安装并配置至少一个 CLI：`claude` 或 `codex`
 - 使用 `runAsUser` 时，需要 `sudo` 和对应的免交互执行权限
 
@@ -69,6 +69,11 @@ Release。网页进程不会直接取得 root shell；它只能启动固定的
 包，校验 `checksums.txt`，备份二进制、配置与 SQLite 文件，并在检查或启动失败时
 自动回滚。更新过程中页面会短暂断开。可在 `config.json` 中设置
 `"updates": {"enabled": false}` 关闭网页更新入口。
+更新器和安装脚本需要 `python3` 解析 Release JSON，不依赖响应缩进。更新器
+优先直连 GitHub，下载失败后尝试 `ghfast.top`；安装包必须同时匹配校验文件与
+GitHub API 提供的资产 SHA-256，代理无法绕过验证。网页会显示更新阶段并等待
+运行版本确认；失败时请查看 `journalctl -u goeasyconnect-updater.service -n 80 --no-pager`。
+更新阶段记录在 root 管理、服务用户只读的 `/var/lib/goeasyconnect-updater/status.json`。
 
 ## 构建与运行
 

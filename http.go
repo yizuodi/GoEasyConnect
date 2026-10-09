@@ -34,6 +34,7 @@ func (a *App) routes() http.Handler {
 	mux.Handle("PUT /api/profiles/{id}", a.requireAuth(http.HandlerFunc(a.handleUpdateProfile)))
 	mux.Handle("DELETE /api/profiles/{id}", a.requireAuth(http.HandlerFunc(a.handleDeleteProfile)))
 	mux.Handle("GET /api/sessions", a.requireAuth(http.HandlerFunc(a.handleListSessions)))
+	mux.Handle("GET /api/update/progress", a.requireAuth(http.HandlerFunc(a.handleUpdateProgress)))
 	mux.Handle("POST /api/sessions", a.requireAuth(http.HandlerFunc(a.handleCreateSession)))
 	mux.Handle("PATCH /api/sessions/{id}", a.requireAuth(http.HandlerFunc(a.handleUpdateSession)))
 	mux.Handle("DELETE /api/sessions/{id}", a.requireAuth(http.HandlerFunc(a.handleDeleteSession)))
@@ -101,6 +102,7 @@ func (a *App) handleAsset(w http.ResponseWriter, r *http.Request) {
 		"index.html": true, "mobile.html": true, "app.js": true, "style.css": true,
 		"xterm.js": true, "xterm.css": true, "xterm-addon-fit.js": true,
 		"conversation-feed.js": true,
+		"update-client.js":     true,
 	}
 	if !allowed[asset] {
 		http.NotFound(w, r)

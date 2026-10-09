@@ -24,6 +24,8 @@ jobs:
         run: bash scripts/install_test.sh
       - name: Test conversation feed client
         run: node --test scripts/conversation_feed_test.cjs
+      - name: Test updater
+        run: node --test scripts/update_helper_test.cjs scripts/update_client_test.cjs
       - name: Test
         env:
           CGO_ENABLED: "0"

@@ -274,7 +274,8 @@ download_latest_release() {
     "https://api.github.com/repos/${repo_owner}/${repo_name}/releases/latest")" \
     || die "cannot query the latest GitHub Release"
 
-  release_tag="$(printf '%s\n' "${release_json}" | sed -n 's/^  "tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)"
+  release_tag="$(printf '%s\n' "${release_json}" | python3 -c 'import json,sys; release=json.load(sys.stdin); tag=release.get("tag_name"); assert isinstance(tag,str) and not release.get("draft") and not release.get("prerelease"); print(tag)')" \
+    || die "cannot parse the latest GitHub Release JSON"
   [[ "${release_tag}" =~ ^v[0-9A-Za-z._-]+$ ]] || die "latest release returned an invalid tag"
   release_version="${release_tag}"
 
@@ -413,6 +414,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+TimeoutStartSec=15min
 ExecStart=${update_helper_path}
 UMask=0077
 UNIT
@@ -614,7 +616,7 @@ upgrade_main() {
   require_root
   require_debian
 
-  for command_name in curl tar sha256sum install mktemp realpath systemctl getent runuser cp mv dirname unlink; do
+  for command_name in curl tar sha256sum install mktemp realpath systemctl getent runuser cp mv dirname unlink python3; do
     command -v "${command_name}" >/dev/null 2>&1 \
       || die "required command is missing: ${command_name}"
   done
@@ -713,7 +715,7 @@ install_main() {
   require_root
   require_debian
 
-  for command_name in curl tar sha256sum install mktemp realpath systemctl getent runuser; do
+  for command_name in curl tar sha256sum install mktemp realpath systemctl getent runuser python3; do
     command -v "${command_name}" >/dev/null 2>&1 \
       || die "required command is missing: ${command_name}"
   done

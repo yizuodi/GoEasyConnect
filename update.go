@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -24,27 +25,39 @@ type releaseInfo struct {
 }
 
 type updateStatus struct {
-	CurrentVersion  string `json:"currentVersion"`
-	LatestVersion   string `json:"latestVersion,omitempty"`
-	UpdateAvailable bool   `json:"updateAvailable"`
-	ReleaseURL      string `json:"releaseUrl,omitempty"`
-	ReleaseName     string `json:"releaseName,omitempty"`
-	PublishedAt     string `json:"publishedAt,omitempty"`
-	Enabled         bool   `json:"enabled"`
-	Running         bool   `json:"running"`
-	Error           string `json:"error,omitempty"`
+	CurrentVersion  string         `json:"currentVersion"`
+	LatestVersion   string         `json:"latestVersion,omitempty"`
+	UpdateAvailable bool           `json:"updateAvailable"`
+	ReleaseURL      string         `json:"releaseUrl,omitempty"`
+	ReleaseName     string         `json:"releaseName,omitempty"`
+	PublishedAt     string         `json:"publishedAt,omitempty"`
+	Enabled         bool           `json:"enabled"`
+	Running         bool           `json:"running"`
+	Error           string         `json:"error,omitempty"`
+	Progress        updateProgress `json:"progress"`
+}
+
+type updateProgress struct {
+	State          string `json:"state"`
+	Phase          string `json:"phase,omitempty"`
+	TargetVersion  string `json:"targetVersion,omitempty"`
+	UpdatedAt      int64  `json:"updatedAt,omitempty"`
+	CurrentVersion string `json:"currentVersion"`
+	Error          string `json:"error,omitempty"`
 }
 
 const (
-	updateRepository = "yizuodi/GoEasyConnect"
-	updateHelperPath = "/usr/local/libexec/goeasyconnect-updater"
-	updateUnitName   = "goeasyconnect-updater.service"
+	updateRepository   = "yizuodi/GoEasyConnect"
+	updateHelperPath   = "/usr/local/libexec/goeasyconnect-updater"
+	updateUnitName     = "goeasyconnect-updater.service"
+	updateProgressPath = "/var/lib/goeasyconnect-updater/status.json"
 )
 
 var semverPattern = regexp.MustCompile(`^[vV]([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z.-]+))?$`)
 
 func (a *App) updateCheck(ctx context.Context) (updateStatus, error) {
-	status := updateStatus{CurrentVersion: version, Enabled: a.cfg.Updates.Enabled, Running: a.isUpdateRunning()}
+	progress := a.getUpdateProgress()
+	status := updateStatus{CurrentVersion: version, Enabled: a.cfg.Updates.Enabled, Running: progress.State == "running", Progress: progress}
 	if !a.cfg.Updates.Enabled {
 		return status, nil
 	}
@@ -140,7 +153,7 @@ func (a *App) isUpdateRunning() bool {
 	if running {
 		return true
 	}
-	return exec.Command("/usr/bin/systemctl", "is-active", "--quiet", updateUnitName).Run() == nil
+	return a.getUpdateProgress().State == "running"
 }
 
 func (a *App) startUpdate() error {
@@ -150,6 +163,9 @@ func (a *App) startUpdate() error {
 	if _, err := os.Stat(updateHelperPath); err != nil {
 		return fmt.Errorf("update helper is unavailable: %w", err)
 	}
+	if a.getUpdateProgress().State == "running" {
+		return errors.New("an update is already running")
+	}
 	a.updateMu.Lock()
 	if a.updateRunning {
 		a.updateMu.Unlock()
@@ -157,26 +173,66 @@ func (a *App) startUpdate() error {
 	}
 	a.updateRunning = true
 	a.updateMu.Unlock()
-	command := exec.Command("sudo", "-n", "/usr/bin/systemctl", "start", "--no-block", updateUnitName)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "sudo", "-n", "/usr/bin/systemctl", "start", "--no-block", updateUnitName)
 	command.Dir = a.cfg.BaseDir
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
-	if err := command.Start(); err != nil {
+	defer func() {
 		a.updateMu.Lock()
 		a.updateRunning = false
 		a.updateMu.Unlock()
-		return fmt.Errorf("start update helper: %w", err)
-	}
-	go func() {
-		err := command.Wait()
-		a.updateMu.Lock()
-		a.updateRunning = false
-		a.updateMu.Unlock()
-		if err != nil {
-			a.logError("EasyConnect update", err)
-		}
 	}()
+	return runUpdateStart(command)
+}
+
+func runUpdateStart(command *exec.Cmd) error {
+	output, err := command.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("start update helper: %w: %s", err, strings.TrimSpace(truncateText(string(output), 2048)))
+	}
 	return nil
+}
+
+func readUpdateProgress(path string) updateProgress {
+	progress := updateProgress{State: "idle", CurrentVersion: version}
+	file, err := os.Open(path)
+	if err != nil {
+		return progress
+	}
+	defer file.Close()
+	if err := json.NewDecoder(io.LimitReader(file, 4096)).Decode(&progress); err != nil {
+		return updateProgress{State: "unknown", CurrentVersion: version, Error: "Cannot read updater status"}
+	}
+	progress.CurrentVersion = version
+	return progress
+}
+
+func (a *App) getUpdateProgress() updateProgress {
+	progress := readUpdateProgress(updateProgressPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "/usr/bin/systemctl", "show", "--property=ActiveState", "--value", updateUnitName).Output()
+	if err == nil {
+		switch strings.TrimSpace(string(output)) {
+		case "activating", "active":
+			progress.State = "running"
+		case "failed":
+			progress.State = "failed"
+			if progress.Error == "" {
+				progress.Error = "Update failed; inspect journalctl -u goeasyconnect-updater.service -n 80 --no-pager"
+			}
+		case "inactive":
+			if progress.State == "running" {
+				progress.State = "failed"
+				progress.Error = "Updater stopped before completion; inspect the updater journal"
+			}
+		}
+	}
+	return progress
+}
+
+func (a *App) handleUpdateProgress(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, a.getUpdateProgress())
 }
 
 func (a *App) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {

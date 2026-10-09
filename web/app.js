@@ -114,15 +114,20 @@ async function checkForUpdates() {
     if (!status.enabled) {
       return alert(`当前版本 ${status.currentVersion} 未启用网页更新。`);
     }
+    if (status.running) {
+      await monitorEasyConnectUpdate(api, status.progress?.targetVersion || status.latestVersion, button, 0);
+      return;
+    }
     if (!status.updateAvailable) {
       return alert(`当前已经是最新版本 ${status.currentVersion}。`);
     }
     const release = status.releaseName ? `\n${status.releaseName}` : '';
     if (!confirm(`发现新版本 ${status.latestVersion}（当前 ${status.currentVersion}）${release}\n\n更新会自动备份配置和数据库，并重启 EasyConnect。现在更新吗？`)) return;
+    const previousUpdateAt = status.progress?.updatedAt || 0;
     const start = await api('/api/update', { method: 'POST', body: '{}' });
     const result = await start.json();
     if (!start.ok) return alert(result.error || '启动更新失败');
-    alert('更新已开始。EasyConnect 将在完成后自动重启，页面可能会短暂断开。');
+    await monitorEasyConnectUpdate(api, status.latestVersion, button, previousUpdateAt);
   } catch (error) {
     alert(`检查更新失败: ${error.message || error}`);
   } finally {
