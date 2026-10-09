@@ -709,6 +709,15 @@ func (s *AppServerSession) importTurns(turns []json.RawMessage) error {
 }
 
 func (s *AppServerSession) emit(eventType, turnID, itemID string, payload map[string]any) {
+	if eventType == "assistant.message" {
+		delete(payload, "content")
+	}
+	s.mu.Lock()
+	messageID := s.assistantID
+	s.mu.Unlock()
+	if messageID != "" {
+		payload["assistant_message_id"] = messageID
+	}
 	payload = redactPayload(payload, s.apiKey).(map[string]any)
 	emitConversationEvent(s.manager.app, s.sessionID, eventType, turnID, itemID, payload)
 }

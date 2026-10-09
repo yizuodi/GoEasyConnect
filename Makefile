@@ -11,6 +11,7 @@ package:
 test:
 	CGO_ENABLED=0 go test -buildvcs=false ./...
 	bash scripts/install_test.sh
+	node --test scripts/conversation_feed_test.cjs
 
 vet:
 	CGO_ENABLED=0 go vet ./...

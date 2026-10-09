@@ -684,6 +684,18 @@ body {
 
 .hidden { display: none !important; }
 
+.history-older, .message-expand {
+  color: var(--accent);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  cursor: pointer;
+  margin: 8px 0;
+}
+
+.history-older { align-self: center; }
+
 /* ============ Terminal (xterm.js) ============ */
 .xterm { padding: 8px; }
 .xterm-viewport::-webkit-scrollbar { width: 6px; }

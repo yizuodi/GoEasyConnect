@@ -48,6 +48,9 @@ func (a *App) routes() http.Handler {
 	mux.Handle("GET /api/sessions/{id}/conversation/messages", a.requireAuth(http.HandlerFunc(a.handleListConversationMessages)))
 	mux.Handle("POST /api/sessions/{id}/conversation/messages", a.requireAuth(http.HandlerFunc(a.handleCreateConversationMessage)))
 	mux.Handle("GET /api/sessions/{id}/conversation/events", a.requireAuth(http.HandlerFunc(a.handleListConversationEvents)))
+	mux.Handle("GET /api/sessions/{id}/conversation/feed", a.requireAuth(http.HandlerFunc(a.handleConversationFeed)))
+	mux.Handle("GET /api/sessions/{id}/conversation/messages/{messageID}", a.requireAuth(http.HandlerFunc(a.handleConversationMessageDetail)))
+	mux.Handle("GET /api/sessions/{id}/conversation/events/{seq}", a.requireAuth(http.HandlerFunc(a.handleConversationEventDetail)))
 	mux.Handle("POST /api/sessions/{id}/conversation/stop", a.requireAuth(http.HandlerFunc(a.handleStopConversation)))
 	mux.Handle("GET /api/sessions/{id}/output", a.requireAuth(http.HandlerFunc(a.handlePollOutput)))
 	mux.Handle("POST /api/sessions/{id}/input", a.requireAuth(http.HandlerFunc(a.handleTerminalInput)))
@@ -97,6 +100,7 @@ func (a *App) handleAsset(w http.ResponseWriter, r *http.Request) {
 	allowed := map[string]bool{
 		"index.html": true, "mobile.html": true, "app.js": true, "style.css": true,
 		"xterm.js": true, "xterm.css": true, "xterm-addon-fit.js": true,
+		"conversation-feed.js": true,
 	}
 	if !allowed[asset] {
 		http.NotFound(w, r)

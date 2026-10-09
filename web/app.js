@@ -14,13 +14,17 @@ let sidebarCollapsed = localStorage.getItem('ec_sidebar_collapsed') === 'true';
 let terminalFitTimer = null;
 let sessionMode = 'terminal';
 let conversationTimer = null;
-let conversationSeq = 0;
 let conversationEvents = [];
-let conversationMessageKey = '';
-let conversationEventKey = '';
 let conversationAutoScroll = true;
 let conversationLastScrollTop = 0;
-let conversationTurnMessages = new Map();
+let conversationFeed = null;
+let conversationGeneration = 0;
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && currentSessionId && sessionMode === 'conversation' && conversationFeed && !conversationFeed.closed) {
+    pollConversation(currentSessionId, true);
+  }
+});
 
 // Polling state
 let usePolling = localStorage.getItem('ec_polling') === 'true';
@@ -439,6 +443,7 @@ async function selectSession(id) {
 
   disconnectAll();
   stopConversationPolling();
+  if (conversationFeed) conversationFeed.close();
   const conversationEnabled = Boolean(appConfig.experimental?.conversationMode);
   document.getElementById('sessionModeSwitch').classList.toggle('hidden', !conversationEnabled);
   sessionMode = conversationEnabled ? (s.running_mode || s.run_mode || 'terminal') : 'terminal';
@@ -569,6 +574,7 @@ async function switchSessionMode(mode, remember = true) {
     s.run_mode = mode;
   }
   sessionMode = mode;
+  if (mode !== 'conversation' && conversationFeed) conversationFeed.close();
   updateSessionURL(currentSessionId, mode);
   disconnectAll();
   stopConversationPolling();
@@ -579,13 +585,33 @@ async function switchSessionMode(mode, remember = true) {
   document.getElementById('conversationPanel').classList.toggle('hidden', mode !== 'conversation');
   if (mode === 'conversation') {
     if (term) { term.dispose(); term = null; }
-    conversationSeq = 0;
     conversationEvents = [];
-    conversationMessageKey = '';
-    conversationEventKey = '';
     conversationAutoScroll = true;
     conversationLastScrollTop = 0;
-    conversationTurnMessages = new Map();
+    if (conversationFeed) conversationFeed.close();
+    conversationGeneration++;
+    document.getElementById('conversationMessages').replaceChildren();
+    const feedSessionId = currentSessionId;
+    conversationFeed = new ConversationFeed(
+      (path, options) => api(`/api/sessions/${feedSessionId}${path}`, options),
+      (messages, events, older, latest) => {
+        if (currentSessionId !== feedSessionId || sessionMode !== 'conversation') return;
+        const container = document.getElementById('conversationMessages');
+        const anchor = captureFeedScroll(container);
+        if (latest) conversationAutoScroll = true;
+        else if (older) conversationAutoScroll = false;
+        conversationEvents = events;
+        renderConversationMessages(messages);
+        if (older) {
+          conversationAutoScroll = false;
+          restoreFeedScroll(container, anchor);
+          conversationLastScrollTop = container.scrollTop;
+        }
+      },
+      (running, sessionRunning) => {
+        if (currentSessionId === feedSessionId && sessionMode === 'conversation') setConversationState(Boolean(running), Boolean(sessionRunning));
+      }
+    );
     updateConversationWarning(s);
     await pollConversation(currentSessionId, true);
     return;
@@ -624,10 +650,11 @@ function bindConversationScrollBehavior() {
 }
 
 function updateConversationDOM(container, update) {
-  const previousScrollTop = container.scrollTop;
+  const anchor = captureFeedScroll(container);
   const shouldFollow = conversationAutoScroll;
   update();
-  container.scrollTop = shouldFollow ? container.scrollHeight : previousScrollTop;
+  if (shouldFollow) container.scrollTop = container.scrollHeight;
+  else restoreFeedScroll(container, anchor);
   conversationLastScrollTop = container.scrollTop;
 }
 
@@ -641,60 +668,13 @@ function stopConversationPolling() {
 async function pollConversation(sessionId, immediate = false) {
   stopConversationPolling();
   if (currentSessionId !== sessionId || sessionMode !== 'conversation') return;
+  const generation = ++conversationGeneration;
+  let hasMore = false;
   try {
-    const [messagesResponse, eventsResponse] = await Promise.all([
-      api(`/api/sessions/${sessionId}/conversation/messages`),
-      api(`/api/sessions/${sessionId}/conversation/events?after=${conversationSeq}`)
-    ]);
-    if (messagesResponse.ok) {
-      const data = await messagesResponse.json();
-      renderConversationMessages(data.messages || []);
-      setConversationState(Boolean(data.running), Boolean(data.session_running));
-    }
-    if (eventsResponse.ok) {
-      const data = await eventsResponse.json();
-      for (const event of data.events || []) {
-        conversationSeq = Math.max(conversationSeq, event.seq || 0);
-        rememberConversationEventContext(event);
-        if (event.type.startsWith('tool.') || event.type === 'file.change' || event.type === 'turn.failed') {
-          mergeConversationEvent(conversationEvents, event);
-        }
-      }
-      renderConversationEvents();
-      setConversationState(Boolean(data.running), Boolean(data.session_running));
-    }
+    if (conversationFeed) hasMore = await conversationFeed.poll();
   } catch {}
-  if (currentSessionId === sessionId && sessionMode === 'conversation') {
-    conversationTimer = setTimeout(() => pollConversation(sessionId), immediate ? 100 : 700);
-  }
-}
-
-function rememberConversationEventContext(event) {
-  if (!event.turn_id) return;
-  const messageId = event.payload?.assistant_message_id ||
-    (event.type === 'assistant.message' ? event.payload?.message_id : '');
-  if (!messageId || conversationTurnMessages.get(event.turn_id) === messageId) return;
-  conversationTurnMessages.set(event.turn_id, messageId);
-  conversationEventKey = '';
-}
-
-function mergeConversationEvent(events, event) {
-  const lifecycleEvent = event.type.startsWith('tool.') || event.type === 'file.change';
-  const key = lifecycleEvent && event.item_id
-    ? `${event.turn_id || ''}:${event.item_id}`
-    : event.type === 'turn.failed' && event.turn_id
-      ? `${event.turn_id}:turn.failed`
-      : '';
-  if (!key) {
-    events.push(event);
-    return;
-  }
-  const index = events.findIndex(existing => existing._displayKey === key);
-  event._displayKey = key;
-  if (index === -1) {
-    events.push(event);
-  } else {
-    events[index] = event;
+  if (generation === conversationGeneration && currentSessionId === sessionId && sessionMode === 'conversation') {
+    conversationTimer = setTimeout(() => pollConversation(sessionId), conversationFeed.delay(hasMore, document.hidden));
   }
 }
 
@@ -710,66 +690,17 @@ function conversationEventBody(payload) {
 }
 
 function renderConversationMessages(messages) {
-  const key = messages.map(message => `${message.id}:${message.content}`).join('|');
-  if (key === conversationMessageKey) return;
-  conversationMessageKey = key;
-  conversationEventKey = '';
   const container = document.getElementById('conversationMessages');
   updateConversationDOM(container, () => {
-    container.querySelectorAll('.conversation-message,.conversation-empty').forEach(node => node.remove());
-    if (!messages.length) {
-      const empty = document.createElement('div');
-      empty.className = 'conversation-empty';
-      empty.textContent = '对话模式\n停止会话后可切换到原生终端';
-      container.prepend(empty);
-    } else {
-      for (const message of messages) {
-        const element = document.createElement('div');
-        element.className = `conversation-message ${message.role === 'user' ? 'user' : 'assistant'}`;
-        element.dataset.messageId = message.id;
-        element.textContent = message.content || '';
-        container.insertBefore(element, container.querySelector('.conversation-tool,.conversation-error'));
-      }
-    }
+    renderFeedMessages(container, messages, conversationFeed, 'conversation-message');
   });
   renderConversationEvents();
 }
 
 function renderConversationEvents() {
-  const visibleEvents = conversationEvents.slice(-50);
-  const key = visibleEvents.map(event => `${event.seq || 0}:${event.type}:${JSON.stringify(event.payload || {})}`).join('|');
-  if (key === conversationEventKey) return;
-  conversationEventKey = key;
   const container = document.getElementById('conversationMessages');
   updateConversationDOM(container, () => {
-    container.querySelectorAll('.conversation-tool,.conversation-error').forEach(node => node.remove());
-    const messageElements = new Map();
-    container.querySelectorAll('.conversation-message[data-message-id]').forEach(node => {
-      messageElements.set(node.dataset.messageId, node);
-    });
-    for (const event of visibleEvents) {
-      const payload = event.payload || {};
-      const messageId = payload.assistant_message_id || conversationTurnMessages.get(event.turn_id);
-      const anchor = messageElements.get(messageId);
-      // Historical events without a reliable turn/message association used to
-      // accumulate below the newest reply. Hide them instead of misplacing them.
-      if (!anchor) continue;
-      if (event.type === 'turn.failed') {
-        const error = document.createElement('div');
-        error.className = 'conversation-error';
-        error.textContent = payload.message || '执行失败';
-        container.insertBefore(error, anchor);
-        continue;
-      }
-      const detail = document.createElement('details');
-      detail.className = 'conversation-tool';
-      const summary = document.createElement('summary');
-      summary.textContent = payload.command || payload.kind || '文件变更';
-      const output = document.createElement('pre');
-      output.textContent = conversationEventBody(payload);
-      detail.append(summary, output);
-      container.insertBefore(detail, anchor);
-    }
+    renderFeedEvents(container, conversationEvents, conversationFeed, 'conversation-tool', conversationEventBody);
   });
 }
 

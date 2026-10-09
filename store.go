@@ -125,6 +125,9 @@ CREATE INDEX IF NOT EXISTS idx_conversation_events_session_seq ON conversation_e
 	if _, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_conversation_source ON messages(session_id,channel,source_id) WHERE source_id<>''`); err != nil {
 		return fmt.Errorf("create conversation source index: %w", err)
 	}
+	if err := s.initializeConversationFeed(); err != nil {
+		return err
+	}
 	if _, err := s.db.Exec(`UPDATE sessions SET status='stopped',auto_continue_next_at=''`); err != nil {
 		return fmt.Errorf("reset stale session status: %w", err)
 	}

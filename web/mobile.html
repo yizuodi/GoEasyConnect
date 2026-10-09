@@ -120,6 +120,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',Roboto,san
 .xterm-viewport::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 
 .hidden{display:none!important}
+.history-older,.message-expand{color:var(--accent);background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin:8px 0;touch-action:manipulation}
   </style>
 </head>
 <body>
@@ -198,6 +199,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',Roboto,san
 
   <script src="/xterm.js"></script>
   <script src="/xterm-addon-fit.js"></script>
+  <script src="/conversation-feed.js"></script>
   <script>
 const $=s=>document.getElementById(s);
 
@@ -208,9 +210,13 @@ let ws=null,wsConnectGeneration=0,term=null,fit=null;
 let usePolling=localStorage.getItem('ec_polling')==='true';
 let pollSeq=0,pollTimer=null,POLL_MS=300;
 let curPage='sessions',appCfg={},appDefaults={};
-let sessionView='terminal',convTimer=null,convSeq=0,convEvents=[],convMessageKey='',convEventKey='';
+let sessionView='terminal',convTimer=null,convEvents=[];
 let convAutoScroll=true,convLastScrollTop=0;
-let convTurnMessages=new Map();
+let convFeed=null,convGeneration=0;
+
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden&&sid&&sessionView==='conversation'&&convFeed&&!convFeed.closed)pollConversation(sid,true);
+});
 
 // ============ Events (addEventListener, no inline onclick) ============
 $('loginBtn').addEventListener('click',doLogin);
@@ -300,6 +306,7 @@ function goTab(tab){
   $('tabbar').style.display='';
 }
 function goSessions(){
+  if(convFeed)convFeed.close();
   sid=null;disconnectAll();stopConversationPoll();
   updateSessionURL(null);
   if(term){term.dispose();term=null;}
@@ -314,6 +321,7 @@ function goSessions(){
   refresh();
 }
 async function goTerm(s){
+  if(convFeed)convFeed.close();
   sid=s.id;curPage='terminal';
   $('pgSessions').classList.remove('active');
   $('pgProfiles').classList.remove('active');
@@ -429,6 +437,7 @@ async function switchSessionView(view){
     s.run_mode=view;
   }
   sessionView=view;
+  if(view!=='conversation'&&convFeed)convFeed.close();
   updateSessionURL(sid,view);
   disconnectAll();stopConversationPoll();updateCtrl(s);
   if(view==='conversation')await openConversation(s);
@@ -442,33 +451,33 @@ async function openConversation(s){
   if(term){term.dispose();term=null;}
   $('termBox').classList.add('hidden');$('convView').classList.remove('hidden');$('termFooter').classList.remove('hidden');
   $('chatViewBtn').classList.add('on');$('termViewBtn').classList.remove('on');
-  convSeq=0;convEvents=[];convMessageKey='';convEventKey='';convAutoScroll=true;convLastScrollTop=0;convTurnMessages=new Map();
+  convEvents=[];convAutoScroll=true;convLastScrollTop=0;
+  if(convFeed)convFeed.close();convGeneration++;$('convMessages').replaceChildren();
+  const feedId=s.id;
+  convFeed=new ConversationFeed((path,options)=>api('/api/sessions/'+feedId+path,options),(messages,events,older,latest)=>{
+    if(sid!==feedId||sessionView!=='conversation')return;
+    const box=$('convMessages'),anchor=captureFeedScroll(box);
+    if(latest)convAutoScroll=true;
+    else if(older)convAutoScroll=false;
+    convEvents=events;renderConversation(messages);
+    if(older){convAutoScroll=false;restoreFeedScroll(box,anchor);convLastScrollTop=box.scrollTop;}
+  },(running,sessionRunning)=>{if(sid===feedId&&sessionView==='conversation')setConversationState(!!running,!!sessionRunning);});
   updateConvHint(s);
   await pollConversation(s.id,true);
 }
 function stopConversationPoll(){if(convTimer){clearTimeout(convTimer);convTimer=null;}}
 async function pollConversation(id,immediate=false){
   stopConversationPoll();if(!sid||sid!==id||sessionView!=='conversation')return;
+  const generation=++convGeneration;let hasMore=false;
   try{
-    const[mr,er]=await Promise.all([api('/api/sessions/'+id+'/conversation/messages'),api('/api/sessions/'+id+'/conversation/events?after='+convSeq)]);
-    if(mr.ok){const data=await mr.json();renderConversation(data.messages||[]);setConversationState(!!data.running,!!data.session_running);}
-    if(er.ok){const data=await er.json();for(const ev of(data.events||[])){convSeq=Math.max(convSeq,ev.seq||0);rememberConvContext(ev);if(ev.type.startsWith('tool.')||ev.type==='file.change'||ev.type==='turn.failed')mergeConvEvent(ev);}renderConversationEvents();setConversationState(!!data.running,!!data.session_running);}
+    if(convFeed)hasMore=await convFeed.poll();
   }catch{}
-  if(sid===id&&sessionView==='conversation')convTimer=setTimeout(()=>pollConversation(id),immediate?100:700);
+  if(generation===convGeneration&&sid===id&&sessionView==='conversation')convTimer=setTimeout(()=>pollConversation(id),convFeed.delay(hasMore,document.hidden));
 }
 function renderConversation(messages){
-  const key=messages.map(m=>m.id+':'+m.content).join('|');if(key===convMessageKey)return;convMessageKey=key;convEventKey='';
-  const box=$('convMessages');updateConvDOM(box,()=>{box.querySelectorAll('.conv-msg,.conv-empty').forEach(n=>n.remove());if(!messages.length){const e=document.createElement('div');e.className='conv-empty';e.textContent='对话模式\n停止会话后可切换到原生终端';box.prepend(e);}else for(const m of messages){const el=document.createElement('div');el.className='conv-msg '+(m.role==='user'?'user':'assistant');el.dataset.messageId=m.id;el.textContent=m.content||'';box.insertBefore(el,box.querySelector('.conv-tool,.conv-error'));}});renderConversationEvents();
+  const box=$('convMessages');updateConvDOM(box,()=>renderFeedMessages(box,messages,convFeed,'conv-msg'));renderConversationEvents();
 }
-function updateConvDOM(box,update){const previous=box.scrollTop,follow=convAutoScroll;update();box.scrollTop=follow?box.scrollHeight:previous;convLastScrollTop=box.scrollTop;}
-function rememberConvContext(ev){if(!ev.turn_id)return;const messageId=ev.payload?.assistant_message_id||(ev.type==='assistant.message'?ev.payload?.message_id:'');if(!messageId||convTurnMessages.get(ev.turn_id)===messageId)return;convTurnMessages.set(ev.turn_id,messageId);convEventKey='';}
-function mergeConvEvent(ev){
-  const lifecycle=ev.type.startsWith('tool.')||ev.type==='file.change';
-  const key=lifecycle&&ev.item_id?(ev.turn_id||'')+':'+ev.item_id:ev.type==='turn.failed'&&ev.turn_id?ev.turn_id+':turn.failed':'';
-  if(!key){convEvents.push(ev);return;}
-  ev._displayKey=key;const index=convEvents.findIndex(item=>item._displayKey===key);
-  if(index<0)convEvents.push(ev);else convEvents[index]=ev;
-}
+function updateConvDOM(box,update){const anchor=captureFeedScroll(box),follow=convAutoScroll;update();if(follow)box.scrollTop=box.scrollHeight;else restoreFeedScroll(box,anchor);convLastScrollTop=box.scrollTop;}
 function convEventBody(p){
   if(p.output)return p.output;
   if(Array.isArray(p.changes)&&p.changes.length)return JSON.stringify(p.changes,null,2);
@@ -476,8 +485,7 @@ function convEventBody(p){
   return p.status||(p.phase==='started'?'执行中…':'无输出');
 }
 function renderConversationEvents(){
-  const visible=convEvents.slice(-50),key=visible.map(ev=>(ev.seq||0)+':'+ev.type+':'+JSON.stringify(ev.payload||{})).join('|');if(key===convEventKey)return;convEventKey=key;
-  const box=$('convMessages');updateConvDOM(box,()=>{box.querySelectorAll('.conv-tool,.conv-error').forEach(n=>n.remove());const messageElements=new Map();box.querySelectorAll('.conv-msg[data-message-id]').forEach(node=>messageElements.set(node.dataset.messageId,node));for(const ev of visible){const p=ev.payload||{},messageId=p.assistant_message_id||convTurnMessages.get(ev.turn_id),anchor=messageElements.get(messageId);if(!anchor)continue;if(ev.type==='turn.failed'){const e=document.createElement('div');e.className='conv-error';e.textContent=p.message||'执行失败';box.insertBefore(e,anchor);continue;}const d=document.createElement('details');d.className='conv-tool';const title=p.command||p.kind||'文件变更';d.innerHTML='<summary>'+esc(title)+'</summary><pre>'+esc(convEventBody(p))+'</pre>';box.insertBefore(d,anchor);}});
+  const box=$('convMessages');updateConvDOM(box,()=>renderFeedEvents(box,convEvents,convFeed,'conv-tool',convEventBody));
 }
 function setConversationBusy(busy){const s=sessions.find(x=>x.id===sid);setConversationState(busy,!!s?.conversation_running);}
 function setConversationState(busy,sessionRunning){$('convSend').classList.toggle('hidden',busy);$('convStop').classList.toggle('hidden',!busy);const s=sessions.find(x=>x.id===sid);if(s){s.turn_running=busy;s.conversation_running=sessionRunning;s.isRunning=!!(s.terminal_running||sessionRunning);if(!s.isRunning)s.running_mode='';$('convInput').disabled=busy||!sessionRunning;$('convSend').disabled=!sessionRunning;updateCtrl(s);renderS();}}

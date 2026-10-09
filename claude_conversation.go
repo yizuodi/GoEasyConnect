@@ -392,6 +392,12 @@ func (s *ClaudeConversationSession) currentTurnID() string {
 }
 
 func (s *ClaudeConversationSession) emit(eventType, turnID, itemID string, payload map[string]any) {
+	s.mu.Lock()
+	messageID := s.assistantID
+	s.mu.Unlock()
+	if messageID != "" {
+		payload["assistant_message_id"] = messageID
+	}
 	emitConversationEvent(s.manager.app, s.sessionID, eventType, turnID, itemID, payload)
 }
 
@@ -568,6 +574,9 @@ func claudeToolSummary(name string, input any) string {
 }
 
 func emitConversationEvent(app *App, sessionID, eventType, turnID, itemID string, payload map[string]any) {
+	if eventType == "assistant.message" {
+		delete(payload, "content")
+	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return
